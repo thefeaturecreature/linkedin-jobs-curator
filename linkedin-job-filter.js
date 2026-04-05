@@ -96,24 +96,48 @@
   }
 
   function matchSalary(card, rule) {
-    // Dismisses if the *max* salary in the card is below threshold
     const threshold = parseFloat(rule.value) * 1000;
     if (isNaN(threshold)) return false;
 
     const items = card.querySelectorAll(SALARY_SEL);
+    const normalizeUnit = unit => {
+      if (!unit) return 'yr';
+      const u = unit.toLowerCase();
+      if (u.startsWith('hr')) return 'hr';
+      if (u.startsWith('hour')) return 'hr';
+      if (u.startsWith('mo')) return 'mo';
+      if (u.startsWith('month')) return 'mo';
+      if (u.startsWith('yr')) return 'yr';
+      if (u.startsWith('year')) return 'yr';
+      return 'yr';
+    };
+
+    const toAnnual = (amount, unit) => {
+      switch (unit) {
+        case 'hr': return amount * 40 * 52;
+        case 'mo': return amount * 12;
+        default: return amount;
+      }
+    };
+
     for (const el of items) {
       const text = el.textContent;
-      // Match things like $80K, $80,000, $120K/yr, $80K–$160K
-      const nums = [...text.matchAll(/\$(\d[\d,]*\.?\d*)\s*[Kk]?/g)].map(m => {
-        let n = parseFloat(m[1].replace(/,/g, ''));
-        const suffix = text.slice(m.index + m[0].length, m.index + m[0].length + 1);
-        if (/[Kk]/.test(suffix) || /[Kk]/.test(m[0])) n *= 1000;
-        return n;
-      });
-      if (nums.length === 0) continue;
-      const maxSalary = Math.max(...nums);
-      if (maxSalary < threshold) return true;
+      const salaries = [];
+      const regex = /\$([\d,]+(?:\.\d+)?)([Kk]?)(?:\s*(?:[\/\\]\s*)?(yr|year|mo|month|hr|hour))?/g;
+      let match;
+      while ((match = regex.exec(text))) {
+        let amount = parseFloat(match[1].replace(/,/g, ''));
+        if (isNaN(amount)) continue;
+        if (match[2] && /[Kk]/.test(match[2])) amount *= 1000;
+        const unit = normalizeUnit(match[3]);
+        salaries.push(toAnnual(amount, unit));
+      }
+
+      if (salaries.length === 0) continue;
+      const minSalary = Math.min(...salaries);
+      if (minSalary < threshold) return true;
     }
+
     return false;
   }
 
