@@ -286,8 +286,11 @@
       'z-index:99998',
       'display:none',
       'flex-direction:column',
+      'box-sizing:border-box',
+      'height:100vh',
+      'max-height:100vh',
       'overflow:hidden',
-    ].join(';');
+    ].join(';')
 
     panel.innerHTML = `
 <div id="ljf-header" style="
@@ -309,13 +312,13 @@
   </div>
 </div>
 
-<div id="ljf-rules-list" style="flex:1;overflow-y:auto;padding:6px 14px;"></div>
+<div id="ljf-rules-list" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px 14px;"></div>
 
 <div id="ljf-add-form" style="
   border-top:1px solid #282828;padding:12px 14px;flex-shrink:0;background:#151515;">
   <div style="font-size:10px;color:#666;margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Add Rule</div>
   <select id="ljf-type-sel" style="
-    width:100%;background:#222;color:#e0e0e0;border:1px solid #444;
+    width:100%;background:#fff;color:#000;border:1px solid #ccc;
     border-radius:4px;padding:5px 8px;margin-bottom:6px;font-size:12px;">
     ${Object.entries(RULE_TYPES).map(([k, v]) =>
       `<option value="${k}">${v.label}</option>`
@@ -325,19 +328,35 @@
     placeholder="Value  (e.g. Ethos, 100, Sales...)"
     style="
       width:100%;box-sizing:border-box;
-      background:#222;color:#e0e0e0;border:1px solid #444;
+      background:#fff;color:#000;border:1px solid #ccc;
       border-radius:4px;padding:5px 8px;margin-bottom:6px;font-size:12px;"/>
   <input id="ljf-label-input" type="text"
     placeholder="Label  (optional, e.g. Applied at Ethos)"
     style="
       width:100%;box-sizing:border-box;
-      background:#222;color:#e0e0e0;border:1px solid #444;
+      background:#fff;color:#000;border:1px solid #ccc;
       border-radius:4px;padding:5px 8px;margin-bottom:8px;font-size:12px;"/>
   <button id="ljf-add-btn" style="
     width:100%;background:#166534;color:#fff;border:none;border-radius:4px;
     padding:8px;cursor:pointer;font-size:12px;font-weight:600;">
     + Add Rule
   </button>
+</div>
+
+<div style="padding:10px 14px;border-bottom:1px solid #282828;flex-shrink:0;">
+  <div style="font-size:10px;color:#666;margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Quick Dismiss</div>
+  <div style="display:flex;gap:6px;align-items:center;">
+    <input id="ljf-quick-company" type="text" placeholder="Company name"
+      style="
+        flex:1;box-sizing:border-box;
+        background:#222;color:#e0e0e0;border:1px solid #444;
+        border-radius:4px;padding:5px 8px;font-size:12px;"/>
+    <button id="ljf-quick-dismiss" style="
+      background:#b91c1c;color:#fff;border:none;border-radius:4px;
+      padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">
+      Dismiss
+    </button>
+  </div>
 </div>
 
 <div id="ljf-status" style="
@@ -347,6 +366,15 @@
 
     document.body.appendChild(tab);
     document.body.appendChild(panel);
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #ljf-value-input::placeholder,
+      #ljf-label-input::placeholder {
+        color: #999 !important;
+      }
+    `;
+    document.head.appendChild(style);
 
     // ── Event wiring ──────────────────────────────────────────────────────────
 
@@ -363,6 +391,24 @@
         dismissed += dismissRule(rule);
       }
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
+    });
+
+    document.getElementById('ljf-quick-dismiss').addEventListener('click', () => {
+      const company = document.getElementById('ljf-quick-company').value.trim();
+      if (!company) {
+        setStatus('\u26A0 Enter a company name.');
+        return;
+      }
+      const tempRule = { type: 'company', value: company, label: 'Quick: ' + company };
+      const dismissed = dismissRule(tempRule);
+      document.getElementById('ljf-quick-company').value = '';
+      setStatus('Quick dismiss: ' + dismissed + ' card(s) dismissed.');
+    });
+
+    document.getElementById('ljf-quick-company').addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        document.getElementById('ljf-quick-dismiss').click();
+      }
     });
 
     document.getElementById('ljf-add-btn').addEventListener('click', handleAddRule);
@@ -393,6 +439,7 @@
     document.getElementById('ljf-label-input').value = '';
 
     renderRules();
+    document.getElementById('ljf-panel').scrollTop = 0;
 
     const { matched } = applyRule(rules[rules.length - 1]);
     setStatus('Rule added \u2014 ' + matched + ' card(s) matched.');
