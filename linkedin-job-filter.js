@@ -80,6 +80,10 @@
     return el ? el.textContent.trim() : '';
   }
 
+  function isDismissed(card) {
+    return card.dataset.ljfDismissed || !!card.querySelector('.job-card-list--is-dismissed');
+  }
+
   function matchApplied(card /*, rule */) {
     const el = card.querySelector(APPLIED_SEL);
     return !!el && /applied/i.test(el.textContent);
@@ -185,12 +189,6 @@
 
   // Red = detected, not yet dismissed
   function act(card, rule) {
-    if (card.dataset.ljfDismissed) return; // already orange, leave it
-    card.style.setProperty('background-color', 'rgba(200,40,40,0.10)', 'important');
-    card.style.setProperty('border-left', '3px solid rgba(200,40,40,0.55)', 'important');
-    card.style.setProperty('box-sizing', 'border-box', 'important');
-    card.dataset.ljfHighlighted = rule.id;
-
     if (!card.querySelector('.ljf-badge')) {
       const badge = document.createElement('span');
       badge.className = 'ljf-badge';
@@ -205,6 +203,15 @@
       ].join(';');
       card.style.position = 'relative';
       card.appendChild(badge);
+    }
+
+    if (isDismissed(card)) {
+      markDismissed(card);
+    } else {
+      card.style.setProperty('background-color', 'rgba(200,40,40,0.10)', 'important');
+      card.style.setProperty('border-left', '3px solid rgba(200,40,40,0.55)', 'important');
+      card.style.setProperty('box-sizing', 'border-box', 'important');
+      card.dataset.ljfHighlighted = rule.id;
     }
   }
 
@@ -226,7 +233,7 @@
     if (!matcher) return 0;
     let dismissed = 0;
     for (const card of getCards()) {
-      if (matcher(card, rule) && !card.dataset.ljfDismissed) {
+      if (matcher(card, rule) && !isDismissed(card)) {
         const btn = card.querySelector(DISMISS_SEL);
         if (btn) {
           card.dataset.ljfDismissed = '1';
@@ -245,7 +252,7 @@
     if (!el) return;
     // Only count highlighted cards that haven't been dismissed yet
     const n = [...getCards()].filter(
-      c => c.dataset.ljfHighlighted && !c.dataset.ljfDismissed
+      c => c.dataset.ljfHighlighted && !isDismissed(c)
     ).length;
     el.textContent = n > 0 ? n : '';
   }
