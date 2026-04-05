@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         LinkedIn Job Filter
-// @namespace    https://github.com/local/linkedin-job-filter
+// @namespace    Monkey Scripts
 // @version      1.0.0
 // @description  DOM-only job card filtering with rule manager overlay
 // @match        https://www.linkedin.com/jobs/*
