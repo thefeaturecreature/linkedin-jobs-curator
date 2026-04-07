@@ -287,7 +287,12 @@
     tab.title = 'LinkedIn Job Filter';
     tab.innerHTML =
       '<span id="ljf-tab-flag" style="font-size:15px;line-height:1;">&#9873;</span>' +
-      '<span id="ljf-tab-count" style="font-size:10px;font-weight:700;line-height:1;margin-top:2px;"></span>';
+      '<span id="ljf-tab-count" style="font-size:10px;font-weight:700;line-height:1;margin-top:2px;"></span>' +
+      '<button id="ljf-tab-dismiss" title="Dismiss All" style="' +
+        'margin-top:5px;margin-left:1px;background:#fff;color:#1d4ed8;border:none;' +
+        'border-radius:3px;width:20px;height:20px;cursor:pointer;' +
+        'font-size:11px;font-weight:700;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;' +
+      '">&#10005;</button>';
     tab.style.cssText = [
       'position:fixed', 'right:0', 'top:50%',
       'transform:translateY(-50%)',
@@ -414,6 +419,16 @@
       panel.style.display = panelOpen ? 'flex' : 'none';
       tab.style.right = panelOpen ? '340px' : '0';
       if (panelOpen) renderRules();
+    });
+
+    document.getElementById('ljf-tab-dismiss').addEventListener('click', e => {
+      e.stopPropagation();
+      let dismissed = 0;
+      for (const rule of rules) {
+        dismissed += dismissRule(rule);
+      }
+      updateTabCount();
+      setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
     });
 
     document.getElementById('ljf-run-all').addEventListener('click', () => {
