@@ -23,6 +23,7 @@
   const SALARY_SEL  = '.job-card-container__metadata-item, .job-card-container__metadata-wrapper li span';
   const APPLIED_SEL = '.job-card-container__footer-job-state';
   const DISMISS_SEL = 'button.job-card-container__action';
+  const UNDO_SEL    = 'button.artdeco-button--circle';   // undo/restore button shown after dismiss
 
   // Rule type definitions
   // applied / salary / topsalary are rendered as permanent sticky blocks, not listed in dropdown
@@ -1026,6 +1027,107 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // ─── Card hover menu ─────────────────────────────────────────────────────────
+
+  function setupCardHoverMenu() {
+    const menu = document.createElement('div');
+    menu.id = 'ljf-hover-menu';
+    menu.style.cssText = [
+      'position:fixed', 'z-index:99997',
+      'display:none', 'flex-direction:column', 'gap:4px',
+      'background:none', 'border:none', 'padding:0',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+    ].join(';');
+
+    const btnBase = [
+      'width:25px', 'height:25px', 'padding:0', 'border-radius:50%',
+      'cursor:pointer', 'font-size:11px', 'font-weight:700',
+      'line-height:1', 'text-align:center',
+      'box-shadow:0 1px 4px rgba(0,0,0,.35)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+    ].join(';');
+
+    const addBtn = document.createElement('button');
+    addBtn.title = 'Add company rule';
+    addBtn.textContent = '+';
+    addBtn.style.cssText = btnBase + ';background:#166534;color:#fff;border:none;font-size:14px;';
+
+    const qdBtn = document.createElement('button');
+    qdBtn.title = 'Quick dismiss this company';
+    qdBtn.textContent = '\u00BB';
+    qdBtn.style.cssText = btnBase + ';background:#854d0e;color:#fff;border:none;';
+
+    menu.appendChild(addBtn);
+    menu.appendChild(qdBtn);
+    document.body.appendChild(menu);
+
+    let currentCard = null;
+    let hideTimeout = null;
+
+    function showMenu(btn) {
+      clearTimeout(hideTimeout);
+      const card = btn.closest(CARD_SEL);
+      if (!card) return;
+      currentCard = card;
+      menu.style.display = 'flex';
+      requestAnimationFrame(() => {
+        const rect = btn.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        menu.style.top  = (rect.bottom + 4) + 'px';
+        menu.style.left = (centerX - menu.offsetWidth / 2) + 'px';
+      });
+    }
+
+    function scheduleHide() {
+      hideTimeout = setTimeout(() => {
+        menu.style.display = 'none';
+        currentCard = null;
+      }, 200);
+    }
+
+    const HOVER_SEL = DISMISS_SEL + ', ' + UNDO_SEL;
+
+    document.addEventListener('mouseover', e => {
+      const btn = e.target.closest(HOVER_SEL);
+      if (btn) showMenu(btn);
+    });
+
+    document.addEventListener('mouseout', e => {
+      if (e.target.closest(HOVER_SEL)) scheduleHide();
+    });
+
+    menu.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
+    menu.addEventListener('mouseleave', scheduleHide);
+
+    addBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      menu.style.display = 'none';
+      if (!currentCard) return;
+      const company = cardText(currentCard, COMPANY_SEL);
+      if (!company) { setStatus('\u26A0 Could not detect company name.'); return; }
+      if (rules.find(r => r.type === 'company' && r.value.toLowerCase() === company.toLowerCase())) {
+        setStatus('\u26A0 Rule already exists for: ' + company);
+        return;
+      }
+      const newRule = addRule('company', company, 'Company Name: ' + company);
+      clearHighlights();
+      applyAllRules();
+      const dismissed = dismissRule(newRule);
+      if (panelOpen) renderRules();
+      setStatus('Rule added \u2014 ' + dismissed + ' card(s) dismissed for ' + company);
+    });
+
+    qdBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      menu.style.display = 'none';
+      if (!currentCard) return;
+      const company = cardText(currentCard, COMPANY_SEL);
+      if (!company) { setStatus('\u26A0 Could not detect company name.'); return; }
+      const dismissed = dismissRule({ type: 'company', value: company, label: 'Quick: ' + company });
+      setStatus('Quick dismiss \u2014 ' + dismissed + ' card(s) for ' + company);
+    });
+  }
+
   // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
   function maybeBootstrap() {
@@ -1037,6 +1139,7 @@
   function init() {
     maybeBootstrap();
     buildUI();
+    setupCardHoverMenu();
     setTimeout(() => {
       const n = applyAllRules();
       setStatus('Initial scan \u2014 ' + n + ' card(s) matched.');
