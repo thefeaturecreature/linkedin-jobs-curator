@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Job Filter
 // @namespace    Monkey Scripts
-// @version      1.1.0
+// @version      1.2.0
 // @description  DOM-only job card filtering with rule manager overlay
 // @match        https://www.linkedin.com/jobs/*
 // @grant        GM_setValue
@@ -37,6 +37,49 @@
   // Types shown in the add-rule dropdown (salary types conditionally disabled)
   const DROPDOWN_TYPES = ['company', 'title', 'topsalary', 'salary'];
 
+  const THEMES = {
+    dark: {
+      panelBg:'#1c1c1c', panelText:'#e0e0e0',
+      headerBg:'#111', formBg:'#151515', statusBg:'#111',
+      border1:'#2e2e2e', border2:'#282828', border3:'#222',
+      labelText:'#fff', sectionTitle:'#fff', countText:'#888', arrowText:'#888',
+      ruleLabel:'#fff', ruleType:'#888', emptyText:'#555',
+      rowBg:'#222', rowBorder:'#2a2a2a',
+      appliedBg:'#1a1a2e', appliedBorder:'#2a2a4a', appliedText:'#a0a0c0',
+      salaryOnBg:'#182018', salaryOnBorder:'#2a422a', salaryOnTitle:'#88bb88', salaryOnVal:'#5a8a5a',
+      salaryOffBg:'#181818', salaryOffBorder:'#282828', salaryOffTitle:'#555', salaryOffVal:'#3a3a3a',
+      inputBg:'#fff', inputText:'#000', inputBorder:'#ccc',
+      tabBg:'#1a2d5a', tabAccent:'#7ab0ff',
+      dismissBg:'#1e3d7a', dismissBtnText:'#93c5fd', dismissBtnBorder:'#2d5299',
+      addBg:'#1e3d7a', addBtnText:'#93c5fd',
+      greenBg:'#1a304e', greenText:'#7ab0ff', greenBorder:'#284070',
+      redBg:'#2a1010', redText:'#c66', redBorder:'#3a1a1a',
+      gearText:'#555', gearMenuBg:'#1a1a1a', gearMenuBorder:'#333',
+      gearMenuText:'#ccc', gearMenuDivider:'#2a2a2a',
+      statusText:'#666',
+    },
+    light: {
+      panelBg:'#f5f7fa', panelText:'#111',
+      headerBg:'#e8ecf0', formBg:'#edf0f5', statusBg:'#e8ecf0',
+      border1:'#c8d0dc', border2:'#d0d8e4', border3:'#dce4f0',
+      labelText:'#111', sectionTitle:'#111', countText:'#666', arrowText:'#666',
+      ruleLabel:'#111', ruleType:'#666', emptyText:'#888',
+      rowBg:'#fff', rowBorder:'#d0d8e4',
+      appliedBg:'#eef0ff', appliedBorder:'#b8c0f0', appliedText:'#3a4a9a',
+      salaryOnBg:'#edfaed', salaryOnBorder:'#aad4aa', salaryOnTitle:'#226622', salaryOnVal:'#448844',
+      salaryOffBg:'#f5f5f5', salaryOffBorder:'#d0d0d0', salaryOffTitle:'#999', salaryOffVal:'#bbb',
+      inputBg:'#fff', inputText:'#000', inputBorder:'#bbb',
+      tabBg:'#c7d6ff', tabAccent:'#4e7af7',
+      dismissBg:'#dbeafe', dismissBtnText:'#1d4ed8', dismissBtnBorder:'#93c5fd',
+      addBg:'#dbeafe', addBtnText:'#1d4ed8',
+      greenBg:'#eff6ff', greenText:'#1d4ed8', greenBorder:'#bfdbfe',
+      redBg:'#ecc0c0', redText:'#3a1010', redBorder:'#d09090',
+      gearText:'#777', gearMenuBg:'#fff', gearMenuBorder:'#ccc',
+      gearMenuText:'#333', gearMenuDivider:'#eee',
+      statusText:'#888',
+    },
+  };
+
   // ─── State ────────────────────────────────────────────────────────────────────
 
   let rules              = loadRules();
@@ -44,6 +87,9 @@
   let editingRuleId      = null;
   let editingOrigType    = null;
   let collapsedSections  = { company: false, title: false };
+  let darkMode           = GM_getValue('ljf_darkMode', 'dark') !== 'light';
+
+  function t() { return darkMode ? THEMES.dark : THEMES.light; }
 
   // ─── Storage helpers ─────────────────────────────────────────────────────────
 
@@ -289,7 +335,6 @@
     panel.style.cssText = [
       'position:fixed', 'right:0', 'top:0', 'bottom:0',
       'width:340px',
-      'background:#1c1c1c', 'color:#e0e0e0',
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
       'font-size:13px',
       'box-shadow:-4px 0 24px rgba(0,0,0,.55)',
@@ -302,97 +347,10 @@
       'overflow:hidden',
     ].join(';');
 
-    panel.innerHTML = `
-<div id="ljf-header" style="
-  background:#111;padding:12px 14px;
-  display:flex;align-items:center;justify-content:space-between;
-  border-bottom:1px solid #2e2e2e;flex-shrink:0;">
-  <strong style="font-size:14px;letter-spacing:.3px;">LinkedIn Job Filter</strong>
-  <div style="position:relative;">
-    <button id="ljf-gear" title="Settings" style="
-      background:none;border:none;color:#555;cursor:pointer;
-      font-size:15px;padding:2px 4px;line-height:1;border-radius:3px;">&#9881;</button>
-    <div id="ljf-gear-menu" style="
-      display:none;position:absolute;right:0;top:calc(100% + 4px);
-      background:#1a1a1a;border:1px solid #333;border-radius:4px;
-      min-width:148px;z-index:100001;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.5);">
-      <button class="ljf-gear-item" data-action="export" style="
-        display:block;width:100%;background:none;color:#ccc;border:none;
-        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;">
-        &#8599; Export Rules
-      </button>
-      <button class="ljf-gear-item" data-action="import" style="
-        display:block;width:100%;background:none;color:#ccc;border:none;
-        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
-        border-top:1px solid #2a2a2a;">
-        &#8600; Import Rules
-      </button>
-    </div>
-  </div>
-</div>
-
-<div style="padding:10px 14px;border-bottom:1px solid #282828;flex-shrink:0;">
-  <button id="ljf-run-all" style="
-    width:100%;background:#b91c1c;color:#fff;border:none;border-radius:4px;
-    padding:8px;cursor:pointer;font-size:12px;font-weight:600;">
-    &#10005; Dismiss All
-  </button>
-</div>
-
-<div id="ljf-rules-list" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px 14px;"></div>
-
-<div id="ljf-add-form" style="
-  border-top:1px solid #282828;padding:12px 14px;flex-shrink:0;background:#151515;">
-  <div id="ljf-add-form-title" style="font-size:10px;color:#666;margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Add Rule</div>
-  <select id="ljf-type-sel" style="
-    width:100%;background:#fff;color:#000;border:1px solid #ccc;
-    border-radius:4px;padding:5px 8px;margin-bottom:6px;font-size:12px;">
-    ${DROPDOWN_TYPES.map(k => `<option value="${k}">${RULE_TYPES[k].label}</option>`).join('')}
-  </select>
-  <input id="ljf-value-input" type="text"
-    placeholder="Value  (e.g. Ethos, 100, Sales...)"
-    style="width:100%;box-sizing:border-box;background:#fff;color:#000;border:1px solid #ccc;
-      border-radius:4px;padding:5px 8px;margin-bottom:6px;font-size:12px;"/>
-  <input id="ljf-label-input" type="text"
-    placeholder="Label  (optional)"
-    style="width:100%;box-sizing:border-box;background:#fff;color:#000;border:1px solid #ccc;
-      border-radius:4px;padding:5px 8px;margin-bottom:8px;font-size:12px;"/>
-  <button id="ljf-add-btn" style="
-    width:100%;background:#166534;color:#fff;border:none;border-radius:4px;
-    padding:8px;cursor:pointer;font-size:12px;font-weight:600;">
-    + Add Rule
-  </button>
-</div>
-
-<div style="padding:10px 14px;border-bottom:1px solid #282828;flex-shrink:0;">
-  <div style="font-size:10px;color:#666;margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Quick Dismiss</div>
-  <div style="display:flex;gap:6px;align-items:center;">
-    <input id="ljf-quick-company" type="text" placeholder="Company name"
-      style="flex:1;box-sizing:border-box;background:#fff;color:#000;border:1px solid #ccc;
-        border-radius:4px;padding:5px 8px;font-size:12px;"/>
-    <button id="ljf-quick-dismiss" style="
-      background:#b91c1c;color:#fff;border:none;border-radius:4px;
-      padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">
-      Dismiss
-    </button>
-  </div>
-</div>
-
-<div id="ljf-status" style="
-  background:#111;padding:5px 14px;font-size:11px;color:#555;
-  border-top:1px solid #222;flex-shrink:0;">Ready</div>
-`;
-
     document.body.appendChild(tab);
     document.body.appendChild(panel);
 
-    const style = document.createElement('style');
-    style.textContent = `
-      #ljf-value-input::placeholder, #ljf-label-input::placeholder, #ljf-quick-company::placeholder { color:#999 !important; }
-    `;
-    document.head.appendChild(style);
-
-    // ── Event wiring ──────────────────────────────────────────────────────────
+    // ── Tab events (static, never rebuilt) ───────────────────────────────────
 
     tab.addEventListener('click', () => {
       panelOpen = !panelOpen;
@@ -409,6 +367,100 @@
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
     });
 
+    buildPanelContent();
+  }
+
+  function buildPanelHTML() {
+    const th = t();
+    return `
+<div id="ljf-header" style="
+  background:${th.headerBg};padding:12px 14px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid ${th.border1};flex-shrink:0;">
+  <strong style="font-size:14px;letter-spacing:.3px;">LinkedIn Job Filter</strong>
+  <div style="position:relative;">
+    <button id="ljf-gear" title="Settings" style="
+      background:none;border:none;color:${th.gearText};cursor:pointer;
+      font-size:15px;padding:2px 4px;line-height:1;border-radius:3px;">&#9881;</button>
+    <div id="ljf-gear-menu" style="
+      display:none;position:absolute;right:0;top:calc(100% + 4px);
+      background:${th.gearMenuBg};border:1px solid ${th.gearMenuBorder};border-radius:4px;
+      min-width:158px;z-index:100001;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.5);">
+      <button class="ljf-gear-item" data-action="export" style="
+        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
+        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;">
+        &#8599; Export Rules
+      </button>
+      <button class="ljf-gear-item" data-action="import" style="
+        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
+        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
+        border-top:1px solid ${th.gearMenuDivider};">
+        &#8600; Import Rules
+      </button>
+      <button class="ljf-gear-item" data-action="theme" style="
+        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
+        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
+        border-top:1px solid ${th.gearMenuDivider};">
+        ${darkMode ? '&#9728; Light Mode' : '&#9790; Dark Mode'}
+      </button>
+    </div>
+  </div>
+</div>
+
+<div style="padding:10px 14px;border-bottom:1px solid ${th.border2};flex-shrink:0;">
+  <button id="ljf-run-all" style="
+    width:100%;background:${th.dismissBg};color:${th.dismissBtnText};border:1px solid ${th.dismissBtnBorder};border-radius:4px;
+    padding:8px;cursor:pointer;font-size:12px;font-weight:600;">
+    &#10005; Dismiss All
+  </button>
+</div>
+
+<div id="ljf-rules-list" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px 14px;"></div>
+
+<div id="ljf-add-form" style="
+  border-top:1px solid ${th.border2};padding:12px 14px;flex-shrink:0;background:${th.formBg};">
+  <div id="ljf-add-form-title" style="font-size:10px;color:${th.labelText};margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Add Rule</div>
+  <select id="ljf-type-sel" style="
+    width:100%;background:${th.inputBg};color:${th.inputText};border:1px solid ${th.inputBorder};
+    border-radius:4px;padding:5px 8px;margin-bottom:6px;font-size:12px;">
+    ${DROPDOWN_TYPES.map(k => `<option value="${k}">${RULE_TYPES[k].label}</option>`).join('')}
+  </select>
+  <input id="ljf-value-input" type="text"
+    placeholder="Value  (e.g. Ethos, 100, Sales...)"
+    style="width:100%;box-sizing:border-box;background:${th.inputBg};color:${th.inputText};border:1px solid ${th.inputBorder};
+      border-radius:4px;padding:5px 8px;margin-bottom:6px;font-size:12px;"/>
+  <input id="ljf-label-input" type="text"
+    placeholder="Label  (optional)"
+    style="width:100%;box-sizing:border-box;background:${th.inputBg};color:${th.inputText};border:1px solid ${th.inputBorder};
+      border-radius:4px;padding:5px 8px;margin-bottom:8px;font-size:12px;"/>
+  <button id="ljf-add-btn" style="
+    width:100%;background:${th.addBg};color:${th.addBtnText};border:1px solid ${th.dismissBtnBorder};border-radius:4px;
+    padding:8px;cursor:pointer;font-size:12px;font-weight:600;">
+    + Add Rule
+  </button>
+</div>
+
+<div style="padding:10px 14px;border-bottom:1px solid ${th.border2};flex-shrink:0;">
+  <div style="font-size:10px;color:${th.labelText};margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Quick Dismiss</div>
+  <div style="display:flex;gap:6px;align-items:center;">
+    <input id="ljf-quick-company" type="text" placeholder="Company name"
+      style="flex:1;box-sizing:border-box;background:${th.inputBg};color:${th.inputText};border:1px solid ${th.inputBorder};
+        border-radius:4px;padding:5px 8px;font-size:12px;"/>
+    <button id="ljf-quick-dismiss" style="
+      background:${th.dismissBg};color:${th.dismissBtnText};border:1px solid ${th.dismissBtnBorder};border-radius:4px;
+      padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">
+      Dismiss
+    </button>
+  </div>
+</div>
+
+<div id="ljf-status" style="
+  background:${th.statusBg};padding:5px 14px;font-size:11px;color:${th.statusText};
+  border-top:1px solid ${th.border3};flex-shrink:0;">Ready</div>
+`;
+  }
+
+  function wirePanelEvents() {
     document.getElementById('ljf-run-all').addEventListener('click', () => {
       let dismissed = 0;
       for (const rule of rules) dismissed += dismissRule(rule);
@@ -452,7 +504,8 @@
       btn.addEventListener('click', () => {
         gearMenu.style.display = 'none';
         if (btn.dataset.action === 'export') exportRules();
-        else importRules();
+        else if (btn.dataset.action === 'import') importRules();
+        else if (btn.dataset.action === 'theme') toggleDarkMode();
       });
     });
 
@@ -472,6 +525,49 @@
       updateDropdownBlockedOptions();
       updateLabelVisibility();
     });
+
+    // Apply placeholder styling for current theme
+    let styleEl = document.getElementById('ljf-placeholder-style');
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'ljf-placeholder-style';
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `
+      #ljf-value-input::placeholder, #ljf-label-input::placeholder, #ljf-quick-company::placeholder { color:#999 !important; }
+    `;
+  }
+
+  function updateTabTheme() {
+    const tab        = document.getElementById('ljf-tab');
+    const flag       = document.getElementById('ljf-tab-flag');
+    const dismissBtn = document.getElementById('ljf-tab-dismiss');
+    if (!tab) return;
+    const th = t();
+    tab.style.background = th.tabBg;
+    tab.style.color      = th.tabAccent;
+    if (flag)       flag.style.color = th.tabAccent;
+    if (dismissBtn) { dismissBtn.style.background = th.tabAccent; dismissBtn.style.color = th.tabBg; }
+  }
+
+  function buildPanelContent() {
+    const panel = document.getElementById('ljf-panel');
+    if (!panel) return;
+    const th = t();
+    panel.style.background = th.panelBg;
+    panel.style.color = th.panelText;
+    panel.innerHTML = buildPanelHTML();
+    wirePanelEvents();
+    updateTabTheme();
+    if (panelOpen) renderRules();
+  }
+
+  function toggleDarkMode() {
+    editingRuleId   = null;
+    editingOrigType = null;
+    darkMode = !darkMode;
+    GM_setValue('ljf_darkMode', darkMode ? 'dark' : 'light');
+    buildPanelContent();
   }
 
   // ─── Form edit-state helpers ──────────────────────────────────────────────────
@@ -479,10 +575,14 @@
   function cancelEdit() {
     editingRuleId   = null;
     editingOrigType = null;
-    document.getElementById('ljf-value-input').value = '';
-    document.getElementById('ljf-label-input').value = '';
-    document.getElementById('ljf-add-btn').textContent = '+ Add Rule';
-    document.getElementById('ljf-add-form-title').textContent = 'Add Rule';
+    const vi = document.getElementById('ljf-value-input');
+    const li = document.getElementById('ljf-label-input');
+    const ab = document.getElementById('ljf-add-btn');
+    const ft = document.getElementById('ljf-add-form-title');
+    if (vi) vi.value = '';
+    if (li) li.value = '';
+    if (ab) ab.textContent = '+ Add Rule';
+    if (ft) ft.textContent = 'Add Rule';
     updateDropdownBlockedOptions();
     updateLabelVisibility();
   }
@@ -564,6 +664,7 @@
       script:   'LinkedIn Job Filter',
       source:   SOURCE_URL,
       exported: new Date().toISOString(),
+      darkMode: darkMode ? 'dark' : 'light',
       rules:    rules,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -591,7 +692,7 @@
             setStatus('\u26A0 No rules found in file.');
             return;
           }
-          showImportDialog(data.rules);
+          showImportDialog(data.rules, data.darkMode);
         } catch {
           setStatus('\u26A0 Failed to parse rules file.');
         }
@@ -601,7 +702,8 @@
     input.click();
   }
 
-  function showImportDialog(incoming) {
+  function showImportDialog(incoming, importedDarkMode) {
+    const th = t();
     const overlay = document.createElement('div');
     overlay.style.cssText = [
       'position:fixed', 'inset:0', 'z-index:100002',
@@ -611,8 +713,8 @@
 
     const modal = document.createElement('div');
     modal.style.cssText = [
-      'background:#1c1c1c', 'color:#e0e0e0',
-      'border:1px solid #333', 'border-radius:8px',
+      `background:${th.panelBg}`, `color:${th.panelText}`,
+      `border:1px solid ${th.border1}`, 'border-radius:8px',
       'padding:20px 22px', 'max-width:310px', 'width:90%',
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
       'box-shadow:0 8px 32px rgba(0,0,0,.6)',
@@ -621,18 +723,18 @@
     const countLabel = incoming.length + ' rule' + (incoming.length !== 1 ? 's' : '');
     modal.innerHTML = `
 <div style="font-size:14px;font-weight:600;margin-bottom:8px;">Import Rules</div>
-<div style="font-size:12px;color:#aaa;margin-bottom:18px;">
+<div style="font-size:12px;color:${th.ruleType};margin-bottom:18px;">
   ${escHtml(countLabel)} found. Overwrite all existing rules, or append to them?
 </div>
 <div style="display:flex;gap:8px;justify-content:flex-end;">
   <button id="ljf-imp-cancel" style="
-    background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;
+    background:${th.rowBg};color:${th.ruleType};border:1px solid ${th.rowBorder};
     border-radius:4px;padding:6px 12px;cursor:pointer;font-size:12px;">Cancel</button>
   <button id="ljf-imp-append" style="
-    background:#1e2a1e;color:#6a9;border:1px solid #2a3a2a;
+    background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
     border-radius:4px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">Append</button>
   <button id="ljf-imp-overwrite" style="
-    background:#b91c1c;color:#fff;border:none;
+    background:${th.dismissBg};color:${th.dismissBtnText};border:none;
     border-radius:4px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">Overwrite</button>
 </div>`;
 
@@ -644,25 +746,37 @@
       return arr.map(r => ({ ...r, id: ++id }));
     };
 
+    const applyImportedTheme = () => {
+      if (importedDarkMode === 'dark' || importedDarkMode === 'light') {
+        const newDark = importedDarkMode !== 'light';
+        if (newDark !== darkMode) {
+          darkMode = newDark;
+          GM_setValue('ljf_darkMode', importedDarkMode);
+        }
+      }
+    };
+
     modal.querySelector('#ljf-imp-cancel').addEventListener('click', () => overlay.remove());
 
     modal.querySelector('#ljf-imp-append').addEventListener('click', () => {
       rules.push(...freshIds(incoming));
       saveRules();
+      applyImportedTheme();
       overlay.remove();
+      buildPanelContent();
       clearHighlights();
       applyAllRules();
-      renderRules();
       setStatus('Imported ' + incoming.length + ' rule(s) — appended.');
     });
 
     modal.querySelector('#ljf-imp-overwrite').addEventListener('click', () => {
       rules = freshIds(incoming);
       saveRules();
+      applyImportedTheme();
       overlay.remove();
+      buildPanelContent();
       clearHighlights();
       applyAllRules();
-      renderRules();
       setStatus('Imported ' + incoming.length + ' rule(s) — rules replaced.');
     });
   }
@@ -685,7 +799,7 @@
 
     if (companyRules.length === 0 && titleRules.length === 0) {
       const empty = document.createElement('div');
-      empty.style.cssText = 'color:#555;font-size:12px;padding:10px 0;';
+      empty.style.cssText = `color:${t().emptyText};font-size:12px;padding:10px 0;`;
       empty.textContent = 'No rules yet. Add one below.';
       list.appendChild(empty);
     } else {
@@ -708,25 +822,26 @@
   }
 
   function renderAppliedBlock(rule) {
+    const th = t();
     const div = document.createElement('div');
     div.style.cssText = [
       'padding:8px 10px', 'margin-bottom:4px',
-      'background:#1a1a2e', 'border:1px solid #2a2a4a', 'border-radius:5px',
+      `background:${th.appliedBg}`, `border:1px solid ${th.appliedBorder}`, 'border-radius:5px',
     ].join(';');
 
     const enabled = rule ? rule.enabled : true;
     div.innerHTML = `
 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-  <span style="font-size:12px;color:#a0a0c0;font-weight:600;flex:1;">Already Applied</span>
+  <span style="font-size:12px;color:${th.appliedText};font-weight:600;flex:1;">Already Applied</span>
   <button class="ljf-applied-dismiss" title="Dismiss all matching cards" style="
-    flex-shrink:0;background:#1e2a1e;color:#6a9;border:1px solid #2a3a2a;
+    flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
     border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>
   <button class="ljf-applied-toggle" title="${enabled ? 'Disable rule' : 'Enable rule'}" style="
     flex-shrink:0;border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
     font-size:13px;font-weight:900;line-height:1;text-align:center;
     ${enabled
-      ? 'background:#1e2a1e;color:#6a9;border:1px solid #2a3a2a;'
-      : 'background:#2a1010;color:#c66;border:1px solid #3a1a1a;'
+      ? `background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};`
+      : `background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};`
     }">${enabled ? '✓' : '✕'}</button>
 </div>`;
 
@@ -753,6 +868,7 @@
   }
 
   function renderSalaryBlock(type, rule) {
+    const th = t();
     const typeLabel = RULE_TYPES[type].label;
     const hasValue  = !!(rule && rule.value);
     const display   = hasValue ? ('$' + rule.value + 'k') : 'Not set';
@@ -760,23 +876,23 @@
     const div = document.createElement('div');
     div.style.cssText = [
       'padding:8px 10px', 'margin-bottom:4px', 'cursor:pointer',
-      'background:' + (hasValue ? '#182018' : '#181818'),
-      'border:1px solid ' + (hasValue ? '#2a422a' : '#282828'),
+      `background:${hasValue ? th.salaryOnBg : th.salaryOffBg}`,
+      `border:1px solid ${hasValue ? th.salaryOnBorder : th.salaryOffBorder}`,
       'border-radius:5px',
     ].join(';');
 
     div.innerHTML = `
 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
   <div style="flex:1;min-width:0;">
-    <div style="font-size:12px;color:${hasValue ? '#88bb88' : '#555'};font-weight:600;">${escHtml(typeLabel)}</div>
-    <div style="font-size:11px;color:${hasValue ? '#5a8a5a' : '#3a3a3a'};margin-top:2px;">${escHtml(display)}</div>
+    <div style="font-size:12px;color:${hasValue ? th.salaryOnTitle : th.salaryOffTitle};font-weight:600;">${escHtml(typeLabel)}</div>
+    <div style="font-size:11px;color:${hasValue ? th.salaryOnVal : th.salaryOffVal};margin-top:2px;">${escHtml(display)}</div>
   </div>
   ${hasValue ? `
   <button class="ljf-salary-dismiss" title="Dismiss all matching cards" style="
-    flex-shrink:0;background:#1e2a1e;color:#6a9;border:1px solid #2a3a2a;
+    flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
     border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>
   <button class="ljf-salary-clear" title="Remove this rule" style="
-    flex-shrink:0;background:#2a1010;color:#c66;border:1px solid #3a1a1a;
+    flex-shrink:0;background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};
     border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
     font-size:13px;font-weight:900;line-height:1;text-align:center;">✕</button>` : ''}
 </div>`;
@@ -820,19 +936,20 @@
   }
 
   function renderGroupHeader(label, count, sectionKey) {
+    const th = t();
     const collapsed = collapsedSections[sectionKey];
     const arrow = collapsed ? '▸' : '▾';
     const div = document.createElement('div');
     div.style.cssText = [
       'display:flex', 'align-items:center', 'gap:5px',
-      'font-size:10px', 'color:#666', 'text-transform:uppercase',
+      `font-size:10px;color:${th.sectionTitle}`, 'text-transform:uppercase',
       'letter-spacing:.6px', 'padding:10px 0 4px',
       'cursor:pointer', 'user-select:none',
     ].join(';');
     div.innerHTML =
       `<span>${escHtml(label)}</span>` +
-      `<span style="color:#444;">(${count})</span>` +
-      `<span style="margin-left:auto;font-size:9px;color:#555;">${arrow}</span>`;
+      `<span style="color:${th.countText};">(${count})</span>` +
+      `<span style="margin-left:auto;font-size:9px;color:${th.arrowText};">${arrow}</span>`;
     div.addEventListener('click', () => {
       collapsedSections[sectionKey] = !collapsedSections[sectionKey];
       renderRules();
@@ -841,11 +958,12 @@
   }
 
   function renderRuleRow(rule) {
+    const th = t();
     const row = document.createElement('div');
     row.style.cssText = [
       'display:flex', 'align-items:center', 'gap:7px',
       'padding:7px 8px', 'margin-bottom:3px',
-      'background:#222', 'border:1px solid #2a2a2a',
+      `background:${th.rowBg}`, `border:1px solid ${th.rowBorder}`,
       'border-radius:4px',
     ].join(';');
 
@@ -857,15 +975,15 @@
   ${rule.enabled ? 'checked' : ''}
   style="cursor:pointer;accent-color:#b91c1c;flex-shrink:0;margin:0;"/>
 <div class="ljf-row-label" style="flex:1;min-width:0;cursor:pointer;" title="Click to edit">
-  <div style="font-size:12px;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+  <div style="font-size:12px;color:${th.ruleLabel};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
     title="${safeLabel}">${safeLabel}</div>
-  <div style="font-size:10px;color:#555;margin-top:1px;">${typeLabel}</div>
+  <div style="font-size:10px;color:${th.ruleType};margin-top:1px;">${typeLabel}</div>
 </div>
 <button class="ljf-run-one" data-id="${rule.id}" title="Dismiss all matches for this rule" style="
-  background:#1e2a1e;color:#6a9;border:1px solid #2a3a2a;border-radius:3px;
+  background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};border-radius:3px;
   padding:3px 8px;cursor:pointer;font-size:10px;flex-shrink:0;white-space:nowrap;">✕ dismiss</button>
 <button class="ljf-del" data-id="${rule.id}" title="Delete rule" style="
-  flex-shrink:0;background:#2a1010;color:#c66;border:1px solid #3a1a1a;
+  flex-shrink:0;background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};
   border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
   font-size:13px;font-weight:900;line-height:1;text-align:center;">✕</button>`;
 
