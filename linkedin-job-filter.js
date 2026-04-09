@@ -157,8 +157,14 @@
     return cardText(card, COMPANY_SEL).toLowerCase().includes(rule.value.toLowerCase());
   }
 
+  function normalizeSenior(str) {
+    return str.replace(/\bsr\.?\s*/gi, 'senior ').replace(/\s+/g, ' ').trim();
+  }
+
   function matchTitle(card, rule) {
-    return cardText(card, TITLE_SEL).toLowerCase().includes(rule.value.toLowerCase());
+    const title = normalizeSenior(cardText(card, TITLE_SEL));
+    const value = normalizeSenior(rule.value);
+    return title.toLowerCase().includes(value.toLowerCase());
   }
 
   function normalizeUnit(unit) {
@@ -1455,6 +1461,7 @@
   const DETAIL_TITLE_SEL   = '.jobs-unified-top-card__job-title h1 a, .job-details-jobs-unified-top-card__job-title h1 a';
   const DETAIL_COMPANY_SEL = '.jobs-unified-top-card__company-name a, .job-details-jobs-unified-top-card__company-name a';
   const YES_BTN_SEL        = '[data-view-name="offsite-apply-confirmation-banner-reply-yes"]';
+  const EASY_APPLY_SUBMIT  = '[data-live-test-easy-apply-submit-button]';
 
   function captureAppliedJob() {
     const titleEl   = document.querySelector(DETAIL_TITLE_SEL);
@@ -1491,7 +1498,7 @@
 
   function setupApplyCapture() {
     document.addEventListener('click', e => {
-      if (e.target.closest(YES_BTN_SEL)) captureAppliedJob();
+      if (e.target.closest(YES_BTN_SEL) || e.target.closest(EASY_APPLY_SUBMIT)) captureAppliedJob();
     }, true);
   }
 
