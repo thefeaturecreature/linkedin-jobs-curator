@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Job Filter
 // @namespace    Monkey Scripts
-// @version      1.2.0
+// @version      1.3.0
 // @description  DOM-only job card filtering with rule manager overlay
 // @match        https://www.linkedin.com/jobs/*
 // @grant        GM_setValue
@@ -14,8 +14,9 @@
 
   // ─── Constants ────────────────────────────────────────────────────────────────
 
-  const STORAGE_KEY = 'ljf_rules';
-  const SOURCE_URL  = '';
+  const STORAGE_KEY    = 'ljf_rules';
+  const LOG_KEY        = 'ljf_applied_log';
+  const SOURCE_URL     = '';
 
   const CARD_SEL    = 'li.jobs-search-results__list-item, li.scaffold-layout__list-item';
   const TITLE_SEL   = '.job-card-list__title--link, .job-card-container__link';
@@ -84,6 +85,8 @@
   // ─── State ────────────────────────────────────────────────────────────────────
 
   let rules              = loadRules();
+  let appliedLog         = loadAppliedLog();
+  let jobLogEnabled      = GM_getValue('ljf_jobLogEnabled', 'true') !== 'false';
   let panelOpen          = false;
   let editingRuleId      = null;
   let editingOrigType    = null;
@@ -101,6 +104,15 @@
 
   function saveRules() {
     GM_setValue(STORAGE_KEY, JSON.stringify(rules));
+  }
+
+  function loadAppliedLog() {
+    try { return JSON.parse(GM_getValue(LOG_KEY, '[]')); }
+    catch { return []; }
+  }
+
+  function saveAppliedLog() {
+    GM_setValue(LOG_KEY, JSON.stringify(appliedLog));
   }
 
   function addRule(type, value, label) {
@@ -195,6 +207,39 @@
     return s.length > 0 && Math.max(...s) < threshold;
   }
 
+  // Word-boundary company match: "Flex" won't match "Flexible", "Ro" won't match "ProKatchers", etc.
+  function logCompanyMatches(cardCompany, entryCompany) {
+    if (!entryCompany || entryCompany.length < 2) return false;
+    const escaped = entryCompany.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('\\b' + escaped + '\\b').test(cardCompany.toLowerCase());
+  }
+
+  // Returns the first matching log entry if card's company+title match, else null.
+  function matchJobLog(card) {
+    if (!jobLogEnabled || appliedLog.length === 0) return null;
+    const company = cardText(card, COMPANY_SEL).toLowerCase();
+    const title   = cardText(card, TITLE_SEL).toLowerCase();
+    if (!company && !title) return null;
+    return appliedLog.find(e =>
+      logCompanyMatches(company, e.company) &&
+      e.title && title.includes(e.title.toLowerCase())
+    ) || null;
+  }
+
+  // Returns the latest date string for this company if company matches but no title matches, else null.
+  function matchJobLogCompanyOnly(card) {
+    if (!jobLogEnabled || appliedLog.length === 0) return null;
+    const company = cardText(card, COMPANY_SEL).toLowerCase();
+    if (!company) return null;
+    const companyEntries = appliedLog.filter(e => logCompanyMatches(company, e.company));
+    if (companyEntries.length === 0) return null;
+    const title = cardText(card, TITLE_SEL).toLowerCase();
+    const hasTitleMatch = companyEntries.some(e => e.title && title.includes(e.title.toLowerCase()));
+    if (hasTitleMatch) return null; // full match — handled by matchJobLog
+    const dates = companyEntries.map(e => e.date || '').filter(Boolean).sort();
+    return dates.length > 0 ? dates[dates.length - 1] : '';
+  }
+
   // ─── Core: scan & act ────────────────────────────────────────────────────────
 
   function getCards() {
@@ -215,8 +260,40 @@
   function applyAllRules() {
     let total = 0;
     for (const rule of rules) total += applyRule(rule).matched;
+    applyJobLog();
     updateTabCount();
     return total;
+  }
+
+  function applyJobLog() {
+    if (!jobLogEnabled) return;
+    for (const card of getCards()) {
+      const entry = matchJobLog(card);
+      if (entry) {
+        actJobLog(card, entry);
+      } else {
+        const latestDate = matchJobLogCompanyOnly(card);
+        if (latestDate !== null) actJobLogCompanyLabel(card, latestDate);
+      }
+    }
+  }
+
+  function actJobLogCompanyLabel(card, date) {
+    if (isDismissed(card)) return;
+    if (card.querySelector('.ljf-badge')) return; // don't overwrite a real match badge
+    const badge = document.createElement('span');
+    badge.className = 'ljf-badge';
+    badge.textContent = 'Last applied' + (date ? ' ' + date : '');
+    badge.style.cssText = [
+      'position:absolute', 'bottom:6px', 'right:52px',
+      'background:rgba(80,80,90,0.72)', 'color:#ccc',
+      'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
+      'pointer-events:none', 'z-index:9999',
+      'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
+    ].join(';');
+    card.style.position = 'relative';
+    card.appendChild(badge);
+    card.dataset.ljfJobLogLabel = '1';
   }
 
   function act(card, rule) {
@@ -225,7 +302,7 @@
       badge.className = 'ljf-badge';
       badge.textContent = '\u26F3 ' + rule.label;
       badge.style.cssText = [
-        'position:absolute', 'top:6px', 'right:52px',
+        'position:absolute', 'bottom:6px', 'right:52px',
         'background:rgba(180,30,30,0.80)', 'color:#fff',
         'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
         'pointer-events:none', 'z-index:9999',
@@ -245,12 +322,61 @@
     }
   }
 
+  function actJobLog(card, entry) {
+    if (isDismissed(card)) { markDismissed(card); return; }
+    const alreadyRed = !!card.dataset.ljfHighlighted;
+    const dateStr    = entry.date || '';
+    const badgeText  = 'Applied' + (dateStr ? ' on ' + dateStr : '');
+    const badgeBg    = alreadyRed ? 'rgba(180,30,30,0.80)' : 'rgba(160,130,0,0.88)';
+
+    let badge = card.querySelector('.ljf-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'ljf-badge';
+      badge.style.cssText = [
+        'position:absolute', 'bottom:6px', 'right:52px',
+        'color:#fff', 'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
+        'pointer-events:none', 'z-index:9999',
+        'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
+      ].join(';');
+      card.style.position = 'relative';
+      card.appendChild(badge);
+    }
+    badge.textContent = badgeText;
+    badge.style.background = badgeBg;
+
+    if (!alreadyRed) {
+      card.style.setProperty('background-color', 'rgba(200,170,0,0.13)', 'important');
+      card.style.setProperty('border-left', '3px solid rgba(200,170,0,0.60)', 'important');
+      card.style.setProperty('box-sizing', 'border-box', 'important');
+    }
+    card.dataset.ljfJobLog = '1';
+  }
+
   function markDismissed(card) {
     card.style.setProperty('background-color', 'rgba(200,120,0,0.12)', 'important');
     card.style.setProperty('border-left', '3px solid rgba(200,120,0,0.55)', 'important');
     card.style.setProperty('box-sizing', 'border-box', 'important');
     const badge = card.querySelector('.ljf-badge');
     if (badge) { badge.style.background = 'rgba(180,100,0,0.85)'; badge.textContent = '\u2716 dismissed'; }
+  }
+
+  function dismissJobLog() {
+    let dismissed = 0;
+    for (const card of getCards()) {
+      const entry = matchJobLog(card);
+      if (entry && !isDismissed(card)) {
+        const btn = card.querySelector(DISMISS_SEL);
+        if (btn) {
+          card.dataset.ljfDismissed = '1';
+          btn.click();
+          markDismissed(card);
+          dismissed++;
+          updateTabCount();
+        }
+      }
+    }
+    return dismissed;
   }
 
   function dismissRule(rule) {
@@ -275,7 +401,7 @@
   function updateTabCount() {
     const el = document.getElementById('ljf-tab-count');
     if (!el) return;
-    const n = [...getCards()].filter(c => c.dataset.ljfHighlighted && !isDismissed(c)).length;
+    const n = [...getCards()].filter(c => (c.dataset.ljfHighlighted || c.dataset.ljfJobLog) && !isDismissed(c)).length;
     el.textContent = n > 0 ? n : '';
   }
 
@@ -287,6 +413,8 @@
       delete card.dataset.ljfHighlighted;
       delete card.dataset.ljfDismissed;
       card.querySelector('.ljf-badge')?.remove();
+      delete card.dataset.ljfJobLog;
+      delete card.dataset.ljfJobLogLabel;
     }
     updateTabCount();
   }
@@ -364,6 +492,7 @@
       e.stopPropagation();
       let dismissed = 0;
       for (const rule of rules) dismissed += dismissRule(rule);
+      if (jobLogEnabled) dismissed += dismissJobLog();
       updateTabCount();
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
     });
@@ -397,6 +526,18 @@
         text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
         border-top:1px solid ${th.gearMenuDivider};">
         &#8600; Import Rules
+      </button>
+      <button class="ljf-gear-item" data-action="exportlog" style="
+        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
+        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
+        border-top:1px solid ${th.gearMenuDivider};">
+        &#8599; Export Log
+      </button>
+      <button class="ljf-gear-item" data-action="importlog" style="
+        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
+        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
+        border-top:1px solid ${th.gearMenuDivider};">
+        &#8600; Import Log
       </button>
       <button class="ljf-gear-item" data-action="theme" style="
         display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
@@ -465,6 +606,7 @@
     document.getElementById('ljf-run-all').addEventListener('click', () => {
       let dismissed = 0;
       for (const rule of rules) dismissed += dismissRule(rule);
+      if (jobLogEnabled) dismissed += dismissJobLog();
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
     });
 
@@ -506,6 +648,8 @@
         gearMenu.style.display = 'none';
         if (btn.dataset.action === 'export') exportRules();
         else if (btn.dataset.action === 'import') importRules();
+        else if (btn.dataset.action === 'exportlog') exportAppliedLog();
+        else if (btn.dataset.action === 'importlog') importAppliedLog();
         else if (btn.dataset.action === 'theme') toggleDarkMode();
       });
     });
@@ -782,6 +926,113 @@
     });
   }
 
+  // ─── Applied Log Export / Import ─────────────────────────────────────────────
+
+  function exportAppliedLog() {
+    const payload = {
+      script:      'LinkedIn Job Filter',
+      exported:    new Date().toISOString(),
+      appliedLog:  appliedLog,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'linkedin-applied-log.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus('Applied log exported (' + appliedLog.length + ' entries).');
+  }
+
+  function importAppliedLog() {
+    const input  = document.createElement('input');
+    input.type   = 'file';
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        try {
+          const data = JSON.parse(reader.result);
+          // Accept { appliedLog: [...] } or a bare array
+          const incoming = Array.isArray(data) ? data : (Array.isArray(data.appliedLog) ? data.appliedLog : null);
+          if (!incoming || incoming.length === 0) {
+            setStatus('\u26A0 No log entries found in file.');
+            return;
+          }
+          showLogImportDialog(incoming);
+        } catch {
+          setStatus('\u26A0 Failed to parse log file.');
+        }
+      });
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  function showLogImportDialog(incoming) {
+    const th = t();
+    const overlay = document.createElement('div');
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:100002',
+      'background:rgba(0,0,0,.65)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+    ].join(';');
+
+    const modal = document.createElement('div');
+    modal.style.cssText = [
+      `background:${th.panelBg}`, `color:${th.panelText}`,
+      `border:1px solid ${th.border1}`, 'border-radius:8px',
+      'padding:20px 22px', 'max-width:310px', 'width:90%',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      'box-shadow:0 8px 32px rgba(0,0,0,.6)',
+    ].join(';');
+
+    const countLabel = incoming.length + ' entr' + (incoming.length !== 1 ? 'ies' : 'y');
+    modal.innerHTML = `
+<div style="font-size:14px;font-weight:600;margin-bottom:8px;">Import Applied Log</div>
+<div style="font-size:12px;color:${th.ruleType};margin-bottom:18px;">
+  ${escHtml(countLabel)} found. Overwrite the existing log, or append to it?
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;">
+  <button id="ljf-limp-cancel" style="
+    background:${th.rowBg};color:${th.ruleType};border:1px solid ${th.rowBorder};
+    border-radius:4px;padding:6px 12px;cursor:pointer;font-size:12px;">Cancel</button>
+  <button id="ljf-limp-append" style="
+    background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
+    border-radius:4px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">Append</button>
+  <button id="ljf-limp-overwrite" style="
+    background:${th.dismissBg};color:${th.dismissBtnText};border:none;
+    border-radius:4px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">Overwrite</button>
+</div>`;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    modal.querySelector('#ljf-limp-cancel').addEventListener('click', () => overlay.remove());
+
+    modal.querySelector('#ljf-limp-append').addEventListener('click', () => {
+      appliedLog.push(...incoming);
+      saveAppliedLog();
+      overlay.remove();
+      clearHighlights();
+      applyAllRules();
+      if (panelOpen) renderRules();
+      setStatus('Log imported \u2014 ' + incoming.length + ' entr' + (incoming.length !== 1 ? 'ies' : 'y') + ' appended.');
+    });
+
+    modal.querySelector('#ljf-limp-overwrite').addEventListener('click', () => {
+      appliedLog = incoming;
+      saveAppliedLog();
+      overlay.remove();
+      clearHighlights();
+      applyAllRules();
+      if (panelOpen) renderRules();
+      setStatus('Log imported \u2014 ' + incoming.length + ' entr' + (incoming.length !== 1 ? 'ies' : 'y') + ' (replaced).');
+    });
+  }
+
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   function renderRules() {
@@ -791,6 +1042,7 @@
 
     // ── 1. Always-visible sticky blocks ──────────────────────────────────────
     list.appendChild(renderAppliedBlock(rules.find(r => r.type === 'applied')));
+    list.appendChild(renderJobLogBlock());
     list.appendChild(renderSalaryBlock('topsalary', rules.find(r => r.type === 'topsalary')));
     list.appendChild(renderSalaryBlock('salary',    rules.find(r => r.type === 'salary')));
 
@@ -863,6 +1115,51 @@
         const dismissed = dismissRule(rule);
         setStatus('Already Applied \u2014 ' + dismissed + ' card(s) dismissed.');
       }
+    });
+
+    return div;
+  }
+
+  function renderJobLogBlock() {
+    const th  = t();
+    const count = appliedLog.length;
+    const div = document.createElement('div');
+    div.style.cssText = [
+      'padding:8px 10px', 'margin-bottom:4px',
+      `background:${th.appliedBg}`, `border:1px solid ${th.appliedBorder}`, 'border-radius:5px',
+    ].join(';');
+
+    div.innerHTML = `
+<div style="font-size:10px;color:${th.countText};text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Jobs Applied Log</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+  <span style="font-size:12px;color:${th.appliedText};font-weight:600;flex:1;">
+    job log <span style="font-weight:400;font-size:10px;color:${th.countText};">(${count} entr${count !== 1 ? 'ies' : 'y'})</span>
+  </span>
+  <button class="ljf-joblog-dismiss" title="Dismiss all matching cards" style="
+    flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
+    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>
+  <button class="ljf-joblog-toggle" title="${jobLogEnabled ? 'Disable job log matching' : 'Enable job log matching'}" style="
+    flex-shrink:0;border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
+    font-size:13px;font-weight:900;line-height:1;text-align:center;
+    ${jobLogEnabled
+      ? `background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};`
+      : `background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};`
+    }">${jobLogEnabled ? '✓' : '✕'}</button>
+</div>`;
+
+    div.querySelector('.ljf-joblog-toggle').addEventListener('click', e => {
+      e.stopPropagation();
+      jobLogEnabled = !jobLogEnabled;
+      GM_setValue('ljf_jobLogEnabled', jobLogEnabled ? 'true' : 'false');
+      clearHighlights();
+      applyAllRules();
+      renderRules();
+    });
+
+    div.querySelector('.ljf-joblog-dismiss').addEventListener('click', e => {
+      e.stopPropagation();
+      const dismissed = dismissJobLog();
+      setStatus('Job log \u2014 ' + dismissed + ' card(s) dismissed.');
     });
 
     return div;
@@ -1128,6 +1425,51 @@
     });
   }
 
+  // ─── Apply capture ────────────────────────────────────────────────────────────
+
+  const DETAIL_TITLE_SEL   = '.jobs-unified-top-card__job-title h1 a, .job-details-jobs-unified-top-card__job-title h1 a';
+  const DETAIL_COMPANY_SEL = '.jobs-unified-top-card__company-name a, .job-details-jobs-unified-top-card__company-name a';
+  const YES_BTN_SEL        = '[data-view-name="offsite-apply-confirmation-banner-reply-yes"]';
+
+  function captureAppliedJob() {
+    const titleEl   = document.querySelector(DETAIL_TITLE_SEL);
+    const companyEl = document.querySelector(DETAIL_COMPANY_SEL);
+
+    const title   = titleEl   ? titleEl.textContent.trim()   : '';
+    const company = companyEl ? companyEl.textContent.trim() : '';
+    if (!title && !company) return;
+
+    const href   = titleEl ? (titleEl.getAttribute('href') || '') : '';
+    const jobIdM = href.match(/\/jobs\/view\/(\d+)/);
+    const url    = jobIdM
+      ? 'https://www.linkedin.com/jobs/view/' + jobIdM[1] + '/'
+      : window.location.href;
+
+    const date = new Date().toISOString().slice(0, 10);
+
+    const dup = appliedLog.find(e =>
+      e.company.toLowerCase() === company.toLowerCase() &&
+      e.title.toLowerCase()   === title.toLowerCase()
+    );
+    if (dup) {
+      setStatus('\u2139 Already in log: ' + (title || company));
+      return;
+    }
+
+    appliedLog.push({ company, title, date, url });
+    saveAppliedLog();
+    clearHighlights();
+    applyAllRules();
+    if (panelOpen) renderRules();
+    setStatus('\u2713 Logged: ' + (title || company));
+  }
+
+  function setupApplyCapture() {
+    document.addEventListener('click', e => {
+      if (e.target.closest(YES_BTN_SEL)) captureAppliedJob();
+    }, true);
+  }
+
   // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
   function maybeBootstrap() {
@@ -1140,6 +1482,7 @@
     maybeBootstrap();
     buildUI();
     setupCardHoverMenu();
+    setupApplyCapture();
     setTimeout(() => {
       const n = applyAllRules();
       setStatus('Initial scan \u2014 ' + n + ' card(s) matched.');
