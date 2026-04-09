@@ -278,19 +278,44 @@
     }
   }
 
+  function daysAgo(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d)) return null;
+    const diff = Math.round((Date.now() - d.getTime()) / 86400000);
+    return diff >= 0 ? diff : null;
+  }
+
   function actJobLogCompanyLabel(card, date) {
     if (isDismissed(card)) return;
     if (card.querySelector('.ljf-badge')) return; // don't overwrite a real match badge
+    const days = daysAgo(date);
+    const reapplyOk = days !== null && days >= 14;
     const badge = document.createElement('span');
     badge.className = 'ljf-badge';
-    badge.textContent = 'Last applied' + (date ? ' ' + date : '');
     badge.style.cssText = [
-      'position:absolute', 'bottom:6px', 'right:52px',
-      'background:rgba(80,80,90,0.72)', 'color:#ccc',
+      'position:absolute', 'bottom:6px', 'right:5px',
+      'background:rgba(80,80,90,0.72)', 'color:#fff',
       'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
       'pointer-events:none', 'z-index:9999',
       'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
+      'display:inline-flex', 'align-items:center', 'gap:4px',
     ].join(';');
+
+    const textNode = document.createTextNode(
+      'Last applied' + (date ? ' ' + date : '') +
+      (days !== null ? ' | ' + days + ' days ago' : '')
+    );
+    badge.appendChild(textNode);
+
+    if (days !== null) {
+      const icon = document.createElement('span');
+      icon.textContent = reapplyOk ? '\u2714' : '\u2716';
+      icon.style.cssText = 'font-size:11px;font-weight:900;line-height:1;';
+      icon.style.setProperty('color', reapplyOk ? '#4ade80' : '#f87171', 'important');
+      badge.appendChild(icon);
+    }
+
     card.style.position = 'relative';
     card.appendChild(badge);
     card.dataset.ljfJobLogLabel = '1';
@@ -302,7 +327,7 @@
       badge.className = 'ljf-badge';
       badge.textContent = '\u26F3 ' + rule.label;
       badge.style.cssText = [
-        'position:absolute', 'bottom:6px', 'right:52px',
+        'position:absolute', 'bottom:6px', 'right:5px',
         'background:rgba(180,30,30,0.80)', 'color:#fff',
         'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
         'pointer-events:none', 'z-index:9999',
@@ -334,7 +359,7 @@
       badge = document.createElement('span');
       badge.className = 'ljf-badge';
       badge.style.cssText = [
-        'position:absolute', 'bottom:6px', 'right:52px',
+        'position:absolute', 'bottom:6px', 'right:5px',
         'color:#fff', 'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
         'pointer-events:none', 'z-index:9999',
         'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
@@ -1085,7 +1110,7 @@
     const enabled = rule ? rule.enabled : true;
     div.innerHTML = `
 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-  <span style="font-size:12px;color:${th.appliedText};font-weight:600;flex:1;">Already Applied</span>
+  <span style="font-size:12px;color:${th.appliedText};font-weight:600;flex:1;">LinkedIn Applied Label</span>
   <button class="ljf-applied-dismiss" title="Dismiss all matching cards" style="
     flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
     border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>
@@ -1130,10 +1155,10 @@
     ].join(';');
 
     div.innerHTML = `
-<div style="font-size:10px;color:${th.countText};text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Jobs Applied Log</div>
+<div style="font-size:12px;color:${th.appliedText};font-weight:600;margin-bottom:5px;">Jobs Applied Log</div>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
   <span style="font-size:12px;color:${th.appliedText};font-weight:600;flex:1;">
-    job log <span style="font-weight:400;font-size:10px;color:${th.countText};">(${count} entr${count !== 1 ? 'ies' : 'y'})</span>
+    Job Log <span style="font-weight:400;font-size:10px;color:${th.countText};">(${count} entr${count !== 1 ? 'ies' : 'y'})</span>
   </span>
   <button class="ljf-joblog-dismiss" title="Dismiss all matching cards" style="
     flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
