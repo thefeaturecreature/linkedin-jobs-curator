@@ -557,7 +557,7 @@
     const greenEl = document.getElementById('ljf-tab-count-green');
 
     if (pill && countEl) {
-      const n = cards.filter(c => (c.dataset.ljfHighlighted || c.dataset.ljfJobLog) && !isDismissed(c)).length;
+      const n = cards.filter(c => (c.dataset.ljfHighlighted || (c.dataset.ljfJobLog && !c.dataset.ljfJobLogLabel)) && !isDismissed(c)).length;
       if (n > 0) {
         countEl.textContent = n;
         pill.style.display = 'flex';
