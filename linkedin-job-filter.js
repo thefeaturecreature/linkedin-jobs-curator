@@ -44,6 +44,30 @@
   // Types shown in the add-rule dropdown (salary types conditionally disabled)
   const DROPDOWN_TYPES = ['companydismiss', 'titledismiss', 'topsalarybelow', 'salarybelow', 'companyhi', 'titlehi', 'topsalaryabove', 'salaryabove'];
 
+  // ─── Semantic card-overlay colors ─────────────────────────────────────────────
+  // Applied as transparent RGBA over LinkedIn's own card backgrounds.
+  // Single set — LinkedIn handles its own dark/light theming for the base card.
+  const CC = {
+    // Dismiss (red)
+    dismissBg:       'rgba(200,40,40,0.10)',
+    dismissBorder:   'rgba(200,40,40,0.55)',
+    dismissBadge:    'rgba(180,30,30,0.80)',
+    // Highlight (green)
+    highlightBg:     'rgba(40,180,40,0.11)',
+    highlightBorder: 'rgba(40,180,40,0.55)',
+    highlightBadge:  'rgba(30,150,30,0.82)',
+    // Job log — recent company match (yellow)
+    recentBg:        'rgba(200,170,0,0.13)',
+    recentBorder:    'rgba(200,170,0,0.60)',
+    recentBadge:     'rgba(160,130,0,0.88)',
+    // Dismissed/undo state (orange)
+    dismissedBg:     'rgba(200,120,0,0.12)',
+    dismissedBorder: 'rgba(200,120,0,0.55)',
+    dismissedBadge:  'rgba(180,100,0,0.85)',
+    // Old company-label badge (gray, no card tint)
+    staleBadge:      'rgba(80,80,90,0.72)',
+  };
+
   const THEMES = {
     dark: {
       panelBg:'#1c1c1c', panelText:'#e0e0e0',
@@ -52,11 +76,14 @@
       labelText:'#fff', sectionTitle:'#fff', countText:'#888', arrowText:'#888',
       ruleLabel:'#fff', ruleType:'#888', emptyText:'#555',
       rowBg:'#222', rowBorder:'#2a2a2a',
-      appliedBg:'#1a1a2e', appliedBorder:'#2a2a4a', appliedText:'#a0a0c0',
-      salaryOnBg:'#182018', salaryOnBorder:'#2a422a', salaryOnTitle:'#88bb88', salaryOnVal:'#5a8a5a',
+      // panel row tints — mirror card overlay categories
+      dimRowBg:'rgba(200,40,40,0.10)',    dimRowBorder:'rgba(200,40,40,0.38)',
+      hiRowBg:'rgba(40,180,40,0.10)',     hiRowBorder:'rgba(40,180,40,0.38)',
+      logRowBg:'rgba(200,170,0,0.10)',    logRowBorder:'rgba(200,170,0,0.35)',
       salaryOffBg:'#181818', salaryOffBorder:'#282828', salaryOffTitle:'#555', salaryOffVal:'#3a3a3a',
+      salaryOnTitle:'#88bb88', salaryOnVal:'#5a8a5a',
       inputBg:'#fff', inputText:'#000', inputBorder:'#ccc',
-      tabBg:'#1a2d5a', tabAccent:'#7ab0ff',
+      tabBg:'#111', tabAccent:'#888',
       dismissBg:'#1e3d7a', dismissBtnText:'#93c5fd', dismissBtnBorder:'#2d5299',
       addBg:'#1e3d7a', addBtnText:'#93c5fd',
       greenBg:'#1a304e', greenText:'#7ab0ff', greenBorder:'#284070',
@@ -72,11 +99,14 @@
       labelText:'#111', sectionTitle:'#111', countText:'#666', arrowText:'#666',
       ruleLabel:'#111', ruleType:'#666', emptyText:'#888',
       rowBg:'#fff', rowBorder:'#d0d8e4',
-      appliedBg:'#eef0ff', appliedBorder:'#b8c0f0', appliedText:'#3a4a9a',
-      salaryOnBg:'#edfaed', salaryOnBorder:'#aad4aa', salaryOnTitle:'#226622', salaryOnVal:'#448844',
+      // panel row tints — mirror card overlay categories
+      dimRowBg:'rgba(200,40,40,0.07)',    dimRowBorder:'rgba(200,40,40,0.32)',
+      hiRowBg:'rgba(40,180,40,0.07)',     hiRowBorder:'rgba(40,180,40,0.32)',
+      logRowBg:'rgba(200,170,0,0.09)',    logRowBorder:'rgba(200,170,0,0.38)',
       salaryOffBg:'#f5f5f5', salaryOffBorder:'#d0d0d0', salaryOffTitle:'#999', salaryOffVal:'#bbb',
+      salaryOnTitle:'#226622', salaryOnVal:'#448844',
       inputBg:'#fff', inputText:'#000', inputBorder:'#bbb',
-      tabBg:'#c7d6ff', tabAccent:'#4e7af7',
+      tabBg:'#fff', tabAccent:'#bbb',
       dismissBg:'#dbeafe', dismissBtnText:'#1d4ed8', dismissBtnBorder:'#93c5fd',
       addBg:'#dbeafe', addBtnText:'#1d4ed8',
       greenBg:'#eff6ff', greenText:'#1d4ed8', greenBorder:'#bfdbfe',
@@ -91,7 +121,8 @@
 
   let rules              = loadRules();
   let appliedLog         = loadAppliedLog();
-  let jobLogEnabled      = GM_getValue('ljf_jobLogEnabled', 'true') !== 'false';
+  let jobLogEnabled         = GM_getValue('ljf_jobLogEnabled', 'true') !== 'false';
+  let dismissActionsEnabled = GM_getValue('ljf_dismissActions', 'false') === 'true';
   let panelOpen          = false;
   let editingRuleId      = null;
   let editingOrigType    = null;
@@ -104,6 +135,7 @@
     titlehi:          false,
   };
   let darkMode           = GM_getValue('ljf_darkMode', 'dark') !== 'light';
+  let hoverMenuEnabled   = GM_getValue('ljf_hoverMenu', 'true') !== 'false';
 
   function t() { return darkMode ? THEMES.dark : THEMES.light; }
 
@@ -286,24 +318,93 @@
     return document.querySelectorAll(CARD_SEL);
   }
 
-  function applyRule(rule) {
-    if (!rule.enabled) return { matched: 0 };
+  // Count how many visible cards a single rule matches (no visual side-effects).
+  function countMatches(rule) {
+    if (!rule.enabled) return 0;
     const typeDef = RULE_TYPES[rule.type];
-    if (!typeDef) return { matched: 0 };
-    const { match: matcher, highlight: isHighlight } = typeDef;
-    let matched = 0;
-    for (const card of getCards()) {
-      if (matcher(card, rule)) {
-        matched++;
-        if (isHighlight) actHighlight(card, rule); else act(card, rule);
+    if (!typeDef) return 0;
+    let n = 0;
+    for (const card of getCards()) { if (typeDef.match(card, rule)) n++; }
+    return n;
+  }
+
+  // Add a single badge to a card, stacking above any already-present badges.
+  function addBadge(card, text, bg) {
+    const n = card.querySelectorAll('.ljf-badge').length;
+    const badge = document.createElement('span');
+    badge.className = 'ljf-badge';
+    badge.textContent = text;
+    badge.style.cssText = [
+      'position:absolute', `bottom:${6 + n * 20}px`, 'right:20px',
+      `background:${bg}`, 'color:#fff',
+      'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
+      'pointer-events:none', 'z-index:9999',
+      'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
+    ].join(';');
+    card.appendChild(badge);
+  }
+
+  // Apply all rules to one card, stacking a badge per matching rule.
+  // Returns the number of rules that matched.
+  function applyCardRules(card) {
+    if (isDismissed(card)) { markDismissed(card); return 0; }
+    if (card.dataset.ljfRulesApplied) return 0; // already processed this scan
+
+    const dismissMatches   = [];
+    const highlightMatches = [];
+    for (const rule of rules) {
+      if (!rule.enabled) continue;
+      const typeDef = RULE_TYPES[rule.type];
+      if (!typeDef) continue;
+      if (typeDef.match(card, rule)) {
+        if (typeDef.highlight) highlightMatches.push(rule);
+        else                   dismissMatches.push(rule);
       }
     }
-    return { matched };
+    if (!dismissMatches.length && !highlightMatches.length) return 0;
+
+    // Salary-pair deduplication:
+    //   highlight: both salaryabove + topsalaryabove → keep only salaryabove
+    //   dismiss:   both salarybelow + topsalarybelow → keep only topsalarybelow
+    let shownHighlight = highlightMatches;
+    let shownDismiss   = dismissMatches;
+    if (highlightMatches.some(r => r.type === 'salaryabove') &&
+        highlightMatches.some(r => r.type === 'topsalaryabove')) {
+      shownHighlight = highlightMatches.filter(r => r.type !== 'topsalaryabove');
+    }
+    if (dismissMatches.some(r => r.type === 'salarybelow') &&
+        dismissMatches.some(r => r.type === 'topsalarybelow')) {
+      shownDismiss = dismissMatches.filter(r => r.type !== 'salarybelow');
+    }
+
+    card.style.position = 'relative';
+
+    // Card color: dismiss (red) beats highlight (green).
+    if (shownDismiss.length) {
+      card.style.setProperty('background-color', CC.dismissBg, 'important');
+      card.style.setProperty('border-left', '3px solid ' + CC.dismissBorder, 'important');
+      card.style.setProperty('box-sizing', 'border-box', 'important');
+      clearInnerBorder(card);
+      card.dataset.ljfHighlighted = shownDismiss[0].id;
+    } else {
+      card.style.setProperty('background-color', CC.highlightBg, 'important');
+      card.style.setProperty('border-left', '3px solid ' + CC.highlightBorder, 'important');
+      card.style.setProperty('box-sizing', 'border-box', 'important');
+      clearInnerBorder(card);
+      card.dataset.ljfGreenMatch = shownHighlight[0].id;
+    }
+
+    // Stacked badges: dismiss at the bottom, highlight labels above.
+    for (const rule of shownDismiss)   addBadge(card, '\u26F3 ' + rule.label, CC.dismissBadge);
+    for (const rule of shownHighlight) addBadge(card, '\u2605 ' + rule.label, CC.highlightBadge);
+
+    card.dataset.ljfRulesApplied = '1';
+    return dismissMatches.length + highlightMatches.length;
   }
 
   function applyAllRules() {
     let total = 0;
-    for (const rule of rules) total += applyRule(rule).matched;
+    for (const card of getCards()) total += applyCardRules(card);
     applyJobLog();
     updateTabCount();
     return total;
@@ -332,14 +433,17 @@
 
   function actJobLogCompanyLabel(card, date) {
     if (isDismissed(card)) return;
-    if (card.querySelector('.ljf-badge')) return; // don't overwrite a real match badge
+    if (card.dataset.ljfJobLogLabel) return; // already labelled
     const days = daysAgo(date);
     const reapplyOk = days !== null && days >= 14;
+    const isRecent  = days !== null && days < 14;
+
+    const n = card.querySelectorAll('.ljf-badge').length;
     const badge = document.createElement('span');
     badge.className = 'ljf-badge';
     badge.style.cssText = [
-      'position:absolute', 'bottom:6px', 'right:20px',
-      'background:rgba(80,80,90,0.72)', 'color:#fff',
+      'position:absolute', `bottom:${6 + n * 20}px`, 'right:20px',
+      `background:${isRecent ? CC.recentBadge : CC.staleBadge}`, 'color:#fff',
       'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
       'pointer-events:none', 'z-index:9999',
       'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
@@ -360,6 +464,15 @@
       badge.appendChild(icon);
     }
 
+    // Yellow tint overrides green (highlight) but not red (dismiss).
+    if (isRecent && !card.dataset.ljfHighlighted) {
+      card.style.setProperty('background-color', CC.recentBg, 'important');
+      card.style.setProperty('border-left', '3px solid ' + CC.recentBorder, 'important');
+      card.style.setProperty('box-sizing', 'border-box', 'important');
+      delete card.dataset.ljfGreenMatch;
+      card.dataset.ljfJobLog = '1';
+    }
+
     card.style.position = 'relative';
     card.appendChild(badge);
     card.dataset.ljfJobLogLabel = '1';
@@ -370,104 +483,33 @@
     if (inner) inner.style.setProperty('border-left', 'none', 'important');
   }
 
-  function act(card, rule) {
-    if (!card.querySelector('.ljf-badge')) {
-      const badge = document.createElement('span');
-      badge.className = 'ljf-badge';
-      badge.textContent = '\u26F3 ' + rule.label;
-      badge.style.cssText = [
-        'position:absolute', 'bottom:6px', 'right:20px',
-        'background:rgba(180,30,30,0.80)', 'color:#fff',
-        'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
-        'pointer-events:none', 'z-index:9999',
-        'font-family:-apple-system,BlinkMacSystemFont,sans-serif',
-        'line-height:1.4',
-      ].join(';');
-      card.style.position = 'relative';
-      card.appendChild(badge);
-    }
-    if (isDismissed(card)) {
-      markDismissed(card);
-    } else {
-      card.style.setProperty('background-color', 'rgba(200,40,40,0.10)', 'important');
-      card.style.setProperty('border-left', '3px solid rgba(200,40,40,0.55)', 'important');
-      card.style.setProperty('box-sizing', 'border-box', 'important');
-      clearInnerBorder(card);
-      card.dataset.ljfHighlighted = rule.id;
-    }
-  }
-
-  function actHighlight(card, rule) {
-    if (isDismissed(card)) return;
-    if (card.dataset.ljfHighlighted) return; // dismiss match takes precedence
-
-    const logEntry        = matchJobLog(card);
-    const recentDays      = logEntry ? daysAgo(logEntry.date) : null;
-    const recentlyApplied = recentDays !== null && recentDays < 14;
-
-    const bgColor     = recentlyApplied ? 'rgba(40,160,40,0.05)' : 'rgba(40,180,40,0.11)';
-    const borderColor = recentlyApplied ? 'rgba(40,160,40,0.28)' : 'rgba(40,180,40,0.55)';
-    const badgeBg     = recentlyApplied ? 'rgba(30,120,30,0.58)' : 'rgba(30,150,30,0.82)';
-
-    if (!card.querySelector('.ljf-badge')) {
-      const badge = document.createElement('span');
-      badge.className = 'ljf-badge';
-      badge.textContent = '\u2605 ' + rule.label;
-      badge.style.cssText = [
-        'position:absolute', 'bottom:6px', 'right:20px',
-        `background:${badgeBg}`, 'color:#fff',
-        'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
-        'pointer-events:none', 'z-index:9999',
-        'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
-      ].join(';');
-      card.style.position = 'relative';
-      card.appendChild(badge);
-    }
-    card.style.setProperty('background-color', bgColor, 'important');
-    card.style.setProperty('border-left', `3px solid ${borderColor}`, 'important');
-    card.style.setProperty('box-sizing', 'border-box', 'important');
-    clearInnerBorder(card);
-    card.dataset.ljfGreenMatch = rule.id;
-  }
-
   function actJobLog(card, entry) {
     if (isDismissed(card)) { markDismissed(card); return; }
-    const alreadyRed   = !!card.dataset.ljfHighlighted;
-    const alreadyGreen = !!card.dataset.ljfGreenMatch;
-    const dateStr    = entry.date || '';
-    const badgeText  = 'Applied' + (dateStr ? ' on ' + dateStr : '');
-    const badgeBg    = alreadyRed ? 'rgba(180,30,30,0.80)' : alreadyGreen ? 'rgba(30,120,30,0.70)' : 'rgba(160,130,0,0.88)';
+    if (card.dataset.ljfJobLog) return; // already labelled
+    const alreadyDismissRule = !!card.dataset.ljfHighlighted;
+    const dateStr   = entry.date || '';
+    const badgeText = 'Applied' + (dateStr ? ' on ' + dateStr : '');
 
-    let badge = card.querySelector('.ljf-badge');
-    if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'ljf-badge';
-      badge.style.cssText = [
-        'position:absolute', 'bottom:6px', 'right:20px',
-        'color:#fff', 'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
-        'pointer-events:none', 'z-index:9999',
-        'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
-      ].join(';');
-      card.style.position = 'relative';
-      card.appendChild(badge);
-    }
-    badge.textContent = badgeText;
-    badge.style.background = badgeBg;
+    card.style.position = 'relative';
+    addBadge(card, badgeText, CC.dismissBadge);
 
-    if (!alreadyRed && !alreadyGreen) {
-      card.style.setProperty('background-color', 'rgba(200,170,0,0.13)', 'important');
-      card.style.setProperty('border-left', '3px solid rgba(200,170,0,0.60)', 'important');
+    if (!alreadyDismissRule) {
+      // exact applied match always overrides green — you already applied to this job
+      delete card.dataset.ljfGreenMatch;
+      card.style.setProperty('background-color', CC.dismissBg, 'important');
+      card.style.setProperty('border-left', '3px solid ' + CC.dismissBorder, 'important');
       card.style.setProperty('box-sizing', 'border-box', 'important');
     }
     card.dataset.ljfJobLog = '1';
   }
 
   function markDismissed(card) {
-    card.style.setProperty('background-color', 'rgba(200,120,0,0.12)', 'important');
-    card.style.setProperty('border-left', '3px solid rgba(200,120,0,0.55)', 'important');
+    card.style.setProperty('background-color', CC.dismissedBg, 'important');
+    card.style.setProperty('border-left', '3px solid ' + CC.dismissedBorder, 'important');
     card.style.setProperty('box-sizing', 'border-box', 'important');
-    const badge = card.querySelector('.ljf-badge');
-    if (badge) { badge.style.background = 'rgba(180,100,0,0.85)'; badge.textContent = '\u2716 dismissed'; }
+    card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
+    card.style.position = 'relative';
+    addBadge(card, '\u2716 dismissed', CC.dismissedBadge);
   }
 
   function dismissJobLog() {
@@ -508,17 +550,41 @@
   }
 
   function updateTabCount() {
-    const cards = [...getCards()];
-    const redEl   = document.getElementById('ljf-tab-count');
+    const cards   = [...getCards()];
+    const pill    = document.getElementById('ljf-tab-dismiss-pill');
+    const countEl = document.getElementById('ljf-tab-count');
+    const btn     = document.getElementById('ljf-tab-dismiss');
     const greenEl = document.getElementById('ljf-tab-count-green');
-    if (redEl) {
+
+    if (pill && countEl) {
       const n = cards.filter(c => (c.dataset.ljfHighlighted || c.dataset.ljfJobLog) && !isDismissed(c)).length;
-      redEl.textContent = n > 0 ? n : '';
+      if (n > 0) {
+        countEl.textContent = n;
+        pill.style.display = 'flex';
+        if (dismissActionsEnabled) {
+          // vertical capsule: count on top, X circle below
+          pill.style.borderRadius = '10px';
+          pill.style.padding = '4px 1px 1px';
+          pill.style.width = '20px';
+          pill.style.height = '';
+          if (btn) btn.style.display = 'flex';
+        } else {
+          // circle: count only, no X
+          pill.style.borderRadius = '50%';
+          pill.style.padding = '0';
+          pill.style.width = '20px';
+          pill.style.height = '20px';
+          if (btn) btn.style.display = 'none';
+        }
+      } else {
+        pill.style.display = 'none';
+      }
     }
+
     if (greenEl) {
       const n = cards.filter(c => c.dataset.ljfGreenMatch && !isDismissed(c)).length;
       greenEl.textContent = n > 0 ? n : '';
-      greenEl.style.display = n > 0 ? '' : 'none';
+      greenEl.style.display = n > 0 ? 'flex' : 'none';
     }
   }
 
@@ -530,7 +596,8 @@
       delete card.dataset.ljfHighlighted;
       delete card.dataset.ljfDismissed;
       delete card.dataset.ljfGreenMatch;
-      card.querySelector('.ljf-badge')?.remove();
+      delete card.dataset.ljfRulesApplied;
+      card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
       delete card.dataset.ljfJobLog;
       delete card.dataset.ljfJobLogLabel;
     }
@@ -545,7 +612,15 @@
         const hasUndo    = !!card.querySelector(UNDO_SEL);
         const hasDismiss = !!card.querySelector(DISMISS_SEL);
         if (hasDismiss && !hasUndo) {
+          // Card was manually undismissed — clear all markers so it gets a fresh pass.
           delete card.dataset.ljfDismissed;
+          delete card.dataset.ljfRulesApplied;
+          delete card.dataset.ljfJobLog;
+          delete card.dataset.ljfJobLogLabel;
+          card.style.removeProperty('background-color');
+          card.style.removeProperty('border-left');
+          card.style.removeProperty('box-sizing');
+          card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
         }
       }
     }
@@ -567,19 +642,30 @@
     tab.id = 'ljf-tab';
     tab.title = 'LinkedIn Job Filter';
     tab.innerHTML =
-      '<span id="ljf-tab-flag" style="font-size:15px;line-height:1;color:#4e7af7;">&#9873;</span>' +
-      '<span id="ljf-tab-count" title="Flagged cards" style="font-size:10px;font-weight:700;line-height:1;margin-top:2px;"></span>' +
-      '<button id="ljf-tab-dismiss" title="Dismiss All" style="' +
-        'margin-top:5px;margin-left:1px;background:#4e7af7;color:#c7d6ff;border:none;' +
-        'border-radius:10px;width:20px;height:20px;cursor:pointer;' +
-        'font-size:11px;font-weight:700;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;' +
-      '">&#10005;</button>' +
-      '<span id="ljf-tab-count-green" title="Highlighted cards" style="font-size:10px;font-weight:700;line-height:1;margin-top:4px;color:#4e7af7;display:none;"></span>';
+      '<span id="ljf-tab-flag" style="font-size:15px;line-height:1;">&#9873;</span>' +
+      '<div id="ljf-tab-dismiss-pill" title="Dismiss All" style="' +
+        'display:none;flex-direction:column;align-items:center;justify-content:center;' +
+        'background:#b41e1e;color:#fff;gap:3px;cursor:default;' +
+        'border-radius:10px;padding:4px 1px 2px 1px;width:20px;box-sizing:border-box;' +
+      '">' +
+        '<span id="ljf-tab-count" style="font-size:10px;font-weight:700;line-height:1;"></span>' +
+        '<button id="ljf-tab-dismiss" title="Dismiss All" style="' +
+          'background:#ecc0c0 !important;border:none !important;border-radius:50% !important;' +
+          'width:16px !important;height:16px !important;min-width:16px !important;max-width:16px !important;color:#8b0e0e !important;cursor:pointer;' +
+          'font-size:9px !important;font-weight:700;line-height:1;padding:0 !important;box-sizing:border-box !important;' +
+          'display:flex;align-items:center;justify-content:center;' +
+        '">&#10005;</button>' +
+      '</div>' +
+      '<span id="ljf-tab-count-green" title="Highlighted cards" style="' +
+        'display:none;align-items:center;justify-content:center;' +
+        'background:#1a8c1a;color:#fff;border-radius:50%;' +
+        'width:20px;height:20px;min-width:20px;' +
+        'font-size:10px;font-weight:700;line-height:1;' +
+      '"></span>';
     tab.style.cssText = [
       'position:fixed', 'right:0', 'top:50%',
       'transform:translateY(-50%)',
       'width:26px', 'min-height:54px',
-      'background:#c7d6ff', 'color:#4e7af7',
       'display:flex', 'flex-direction:column',
       'align-items:center', 'justify-content:center', 'gap:3px',
       'padding:8px 0',
@@ -643,54 +729,19 @@
   display:flex;align-items:center;justify-content:space-between;
   border-bottom:1px solid ${th.border1};flex-shrink:0;">
   <strong style="font-size:14px;letter-spacing:.3px;">LinkedIn Job Filter</strong>
-  <div style="position:relative;">
-    <button id="ljf-gear" title="Settings" style="
-      background:none;border:none;color:${th.gearText};cursor:pointer;
-      font-size:15px;padding:2px 4px;line-height:1;border-radius:3px;">&#9881;</button>
-    <div id="ljf-gear-menu" style="
-      display:none;position:absolute;right:0;top:calc(100% + 4px);
-      background:${th.gearMenuBg};border:1px solid ${th.gearMenuBorder};border-radius:4px;
-      min-width:158px;z-index:100001;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.5);">
-      <button class="ljf-gear-item" data-action="export" style="
-        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
-        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;">
-        &#8599; Export Rules
-      </button>
-      <button class="ljf-gear-item" data-action="import" style="
-        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
-        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
-        border-top:1px solid ${th.gearMenuDivider};">
-        &#8600; Import Rules
-      </button>
-      <button class="ljf-gear-item" data-action="exportlog" style="
-        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
-        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
-        border-top:1px solid ${th.gearMenuDivider};">
-        &#8599; Export Log
-      </button>
-      <button class="ljf-gear-item" data-action="importlog" style="
-        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
-        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
-        border-top:1px solid ${th.gearMenuDivider};">
-        &#8600; Import Log
-      </button>
-      <button class="ljf-gear-item" data-action="theme" style="
-        display:block;width:100%;background:none;color:${th.gearMenuText};border:none;
-        text-align:left;padding:8px 12px;cursor:pointer;font-size:12px;
-        border-top:1px solid ${th.gearMenuDivider};">
-        ${darkMode ? '&#9728; Light Mode' : '&#9790; Dark Mode'}
-      </button>
-    </div>
-  </div>
+  <button id="ljf-gear" title="Settings" style="
+    background:none;border:none;color:${th.gearText};cursor:pointer;
+    font-size:15px;padding:2px 4px;line-height:1;border-radius:3px;">&#9881;</button>
 </div>
 
+${dismissActionsEnabled ? `
 <div style="padding:10px 14px;border-bottom:1px solid ${th.border2};flex-shrink:0;">
   <button id="ljf-run-all" style="
     width:100%;background:${th.dismissBg};color:${th.dismissBtnText};border:1px solid ${th.dismissBtnBorder};border-radius:4px;
     padding:8px;cursor:pointer;font-size:12px;font-weight:600;">
     &#10005; Dismiss All
   </button>
-</div>
+</div>` : ''}
 
 <div id="ljf-rules-list" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px 14px;"></div>
 
@@ -717,6 +768,7 @@
   </button>
 </div>
 
+${dismissActionsEnabled ? `
 <div style="padding:10px 14px;border-bottom:1px solid ${th.border2};flex-shrink:0;">
   <div style="font-size:10px;color:${th.labelText};margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Quick Dismiss</div>
   <div style="display:flex;gap:6px;align-items:center;">
@@ -729,7 +781,7 @@
       Dismiss
     </button>
   </div>
-</div>
+</div>` : ''}
 
 <div id="ljf-status" style="
   background:${th.statusBg};padding:5px 14px;font-size:11px;color:${th.statusText};
@@ -738,14 +790,14 @@
   }
 
   function wirePanelEvents() {
-    document.getElementById('ljf-run-all').addEventListener('click', () => {
+    document.getElementById('ljf-run-all')?.addEventListener('click', () => {
       let dismissed = 0;
       for (const rule of rules) dismissed += dismissRule(rule);
       if (jobLogEnabled) dismissed += dismissJobLog();
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
     });
 
-    document.getElementById('ljf-quick-dismiss').addEventListener('click', () => {
+    document.getElementById('ljf-quick-dismiss')?.addEventListener('click', () => {
       const company = document.getElementById('ljf-quick-company').value.trim();
       if (!company) { setStatus('\u26A0 Enter a company name.'); return; }
       const dismissed = dismissRule({ type: 'companydismiss', value: company, label: 'Quick: ' + company });
@@ -753,7 +805,7 @@
       setStatus('Quick dismiss: ' + dismissed + ' card(s) dismissed.');
     });
 
-    document.getElementById('ljf-quick-company').addEventListener('keydown', e => {
+    document.getElementById('ljf-quick-company')?.addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('ljf-quick-dismiss').click();
     });
 
@@ -766,27 +818,10 @@
       });
     });
 
-    // ── Gear menu ─────────────────────────────────────────────────────────────
-    const gearBtn  = document.getElementById('ljf-gear');
-    const gearMenu = document.getElementById('ljf-gear-menu');
-
-    gearBtn.addEventListener('click', e => {
+    // ── Gear button → settings modal ──────────────────────────────────────────
+    document.getElementById('ljf-gear').addEventListener('click', e => {
       e.stopPropagation();
-      gearMenu.style.display = gearMenu.style.display === 'none' ? 'block' : 'none';
-    });
-
-    document.addEventListener('click', () => { gearMenu.style.display = 'none'; });
-    gearMenu.addEventListener('click', e => e.stopPropagation());
-
-    gearMenu.querySelectorAll('.ljf-gear-item').forEach(btn => {
-      btn.addEventListener('click', () => {
-        gearMenu.style.display = 'none';
-        if (btn.dataset.action === 'export') exportRules();
-        else if (btn.dataset.action === 'import') importRules();
-        else if (btn.dataset.action === 'exportlog') exportAppliedLog();
-        else if (btn.dataset.action === 'importlog') importAppliedLog();
-        else if (btn.dataset.action === 'theme') toggleDarkMode();
-      });
+      openSettingsModal();
     });
 
     document.getElementById('ljf-type-sel').addEventListener('change', () => {
@@ -819,15 +854,15 @@
   }
 
   function updateTabTheme() {
-    const tab        = document.getElementById('ljf-tab');
-    const flag       = document.getElementById('ljf-tab-flag');
-    const dismissBtn = document.getElementById('ljf-tab-dismiss');
+    const tab  = document.getElementById('ljf-tab');
+    const flag = document.getElementById('ljf-tab-flag');
     if (!tab) return;
     const th = t();
     tab.style.background = th.tabBg;
-    tab.style.color      = th.tabAccent;
-    if (flag)       flag.style.color = th.tabAccent;
-    if (dismissBtn) { dismissBtn.style.background = th.tabAccent; dismissBtn.style.color = th.tabBg; }
+    tab.style.boxShadow  = darkMode
+      ? '-2px 2px 8px rgba(0,0,0,.7)'
+      : '-2px 2px 8px rgba(0,0,0,.18)';
+    if (flag) flag.style.color = th.tabAccent;
   }
 
   function buildPanelContent() {
@@ -848,6 +883,163 @@
     darkMode = !darkMode;
     GM_setValue('ljf_darkMode', darkMode ? 'dark' : 'light');
     buildPanelContent();
+  }
+
+  // ─── Settings modal ───────────────────────────────────────────────────────────
+
+  function openSettingsModal() {
+    if (document.getElementById('ljf-settings-modal')) return; // already open
+    const th = t();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ljf-settings-modal';
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:100002',
+      'background:rgba(0,0,0,.65)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+    ].join(';');
+
+    const modal = document.createElement('div');
+    modal.style.cssText = [
+      `background:${th.panelBg}`, `color:${th.panelText}`,
+      `border:1px solid ${th.border1}`, 'border-radius:8px',
+      'width:320px', 'overflow:hidden',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      'box-shadow:0 8px 32px rgba(0,0,0,.6)',
+    ].join(';');
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    const header = document.createElement('div');
+    header.style.cssText = [
+      `background:${th.headerBg}`, `border-bottom:1px solid ${th.border1}`,
+      'display:flex', 'align-items:center', 'justify-content:space-between',
+      'padding:11px 14px',
+    ].join(';');
+    const title = document.createElement('strong');
+    title.style.cssText = `font-size:13px;letter-spacing:.3px;color:${th.panelText};`;
+    title.textContent = 'Settings';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715';
+    closeBtn.style.cssText = `background:none;border:none;color:${th.ruleType};cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;`;
+    closeBtn.addEventListener('click', () => overlay.remove());
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    // ── Tab bar ───────────────────────────────────────────────────────────────
+    const TABS = ['Settings', 'Backup'];
+    let activeTab = 'Settings';
+
+    const tabBar = document.createElement('div');
+    tabBar.style.cssText = `display:flex;border-bottom:1px solid ${th.border1};padding:0 8px;`;
+
+    const content = document.createElement('div');
+    content.style.cssText = 'padding:16px 18px;min-height:140px;';
+
+    function mkRow(labelText, control) {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;cursor:pointer;';
+      const lbl = document.createElement('span');
+      lbl.style.cssText = `font-size:12px;color:${th.panelText};`;
+      lbl.textContent = labelText;
+      row.appendChild(lbl);
+      row.appendChild(control);
+      return row;
+    }
+
+    function mkToggle(checked, onChange) {
+      let on = checked;
+      const track = document.createElement('div');
+      const knob  = document.createElement('div');
+      track.style.cssText = 'position:relative;width:32px;height:18px;border-radius:9px;cursor:pointer;transition:background .2s;flex-shrink:0;';
+      knob.style.cssText  = 'position:absolute;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);transition:left .15s;';
+      track.appendChild(knob);
+      function refresh() {
+        track.style.background = on ? '#4e7af7' : (darkMode ? '#444' : '#bbb');
+        knob.style.left = on ? '16px' : '2px';
+      }
+      refresh();
+      track.addEventListener('click', () => { on = !on; refresh(); onChange(on); });
+      return track;
+    }
+
+    function mkBackupBtn(label, onClick) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.style.cssText = [
+        `background:${th.rowBg}`, `color:${th.panelText}`,
+        `border:1px solid ${th.rowBorder}`, 'border-radius:4px',
+        'padding:8px 10px', 'cursor:pointer', 'font-size:12px',
+        'text-align:left', 'width:100%',
+      ].join(';');
+      btn.addEventListener('click', () => { overlay.remove(); onClick(); });
+      return btn;
+    }
+
+    function renderContent() {
+      content.innerHTML = '';
+      if (activeTab === 'Settings') {
+        const divider = () => {
+          const d = document.createElement('div');
+          d.style.cssText = `border-top:1px solid ${th.border2};margin:2px 0;`;
+          return d;
+        };
+        content.appendChild(mkRow('Dark Mode', mkToggle(darkMode, checked => {
+          if (checked !== darkMode) { overlay.remove(); toggleDarkMode(); }
+        })));
+        content.appendChild(divider());
+        content.appendChild(divider());
+        content.appendChild(mkRow('Quick Hover Menu', mkToggle(hoverMenuEnabled, checked => {
+          hoverMenuEnabled = checked;
+          GM_setValue('ljf_hoverMenu', checked ? 'true' : 'false');
+        })));
+        content.appendChild(divider());
+        content.appendChild(mkRow('Dismiss Actions', mkToggle(dismissActionsEnabled, checked => {
+          dismissActionsEnabled = checked;
+          GM_setValue('ljf_dismissActions', checked ? 'true' : 'false');
+          overlay.remove();
+          buildPanelContent();
+          updateTabCount();
+        })));
+      } else {
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+        grid.appendChild(mkBackupBtn('\u2197 Export Rules', exportRules));
+        grid.appendChild(mkBackupBtn('\u2198 Import Rules', importRules));
+        grid.appendChild(mkBackupBtn('\u2197 Export Log',   exportAppliedLog));
+        grid.appendChild(mkBackupBtn('\u2198 Import Log',   importAppliedLog));
+        content.appendChild(grid);
+      }
+    }
+
+    function renderTabs() {
+      tabBar.innerHTML = '';
+      for (const tab of TABS) {
+        const btn = document.createElement('button');
+        btn.textContent = tab;
+        const isActive = tab === activeTab;
+        btn.style.cssText = [
+          'background:none', 'border:none', 'cursor:pointer',
+          'font-size:12px', 'padding:9px 12px', 'line-height:1',
+          `color:${isActive ? th.panelText : th.ruleType}`,
+          `font-weight:${isActive ? '700' : '400'}`,
+          `border-bottom:2px solid ${isActive ? '#4e7af7' : 'transparent'}`,
+          'margin-bottom:-1px',
+        ].join(';');
+        btn.addEventListener('click', () => { activeTab = tab; renderTabs(); renderContent(); });
+        tabBar.appendChild(btn);
+      }
+    }
+
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    modal.appendChild(header);
+    modal.appendChild(tabBar);
+    modal.appendChild(content);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    renderTabs();
+    renderContent();
   }
 
   // ─── Form edit-state helpers ──────────────────────────────────────────────────
@@ -930,8 +1122,9 @@
       document.getElementById('ljf-value-input').value = '';
       document.getElementById('ljf-label-input').value = '';
       renderRules();
+      const matched = countMatches(rules[rules.length - 1]);
       clearHighlights();
-      const { matched } = applyRule(rules[rules.length - 1]);
+      applyAllRules();
       setStatus('Rule added \u2014 ' + matched + ' card(s) matched.');
     }
     updateDropdownBlockedOptions();
@@ -1213,23 +1406,13 @@
       list.appendChild(renderSalaryBlock('topsalarybelow', rules.find(r => r.type === 'topsalarybelow')));
       list.appendChild(renderSalaryBlock('salarybelow',    rules.find(r => r.type === 'salarybelow')));
     }
-    if (companyDismiss.length > 0) {
-      list.appendChild(renderGroupHeader('Companies', companyDismiss.length, 'companydismiss'));
-      if (!dCollapsed && !collapsedSections.companydismiss) {
-        for (const rule of companyDismiss) list.appendChild(renderRuleRow(rule));
-      }
+    list.appendChild(renderGroupHeader('Companies', companyDismiss.length, 'companydismiss'));
+    if (!collapsedSections.companydismiss) {
+      for (const rule of companyDismiss) list.appendChild(renderRuleRow(rule));
     }
-    if (titleDismiss.length > 0) {
-      list.appendChild(renderGroupHeader('Title Keywords', titleDismiss.length, 'titledismiss'));
-      if (!dCollapsed && !collapsedSections.titledismiss) {
-        for (const rule of titleDismiss) list.appendChild(renderRuleRow(rule));
-      }
-    }
-    if (!dCollapsed && companyDismiss.length === 0 && titleDismiss.length === 0) {
-      const empty = document.createElement('div');
-      empty.style.cssText = `color:${t().emptyText};font-size:12px;padding:6px 0 2px;`;
-      empty.textContent = 'No dismiss rules yet.';
-      list.appendChild(empty);
+    list.appendChild(renderGroupHeader('Title Keywords', titleDismiss.length, 'titledismiss'));
+    if (!collapsedSections.titledismiss) {
+      for (const rule of titleDismiss) list.appendChild(renderRuleRow(rule));
     }
 
     // ── Divider ───────────────────────────────────────────────────────────────
@@ -1244,23 +1427,13 @@
       list.appendChild(renderSalaryBlock('topsalaryabove', rules.find(r => r.type === 'topsalaryabove'), true));
       list.appendChild(renderSalaryBlock('salaryabove',    rules.find(r => r.type === 'salaryabove'),    true));
     }
-    if (companyHi.length > 0) {
-      list.appendChild(renderGroupHeader('Companies', companyHi.length, 'companyhi'));
-      if (!hCollapsed && !collapsedSections.companyhi) {
-        for (const rule of companyHi) list.appendChild(renderRuleRow(rule));
-      }
+    list.appendChild(renderGroupHeader('Companies', companyHi.length, 'companyhi'));
+    if (!collapsedSections.companyhi) {
+      for (const rule of companyHi) list.appendChild(renderRuleRow(rule));
     }
-    if (titleHi.length > 0) {
-      list.appendChild(renderGroupHeader('Title Keywords', titleHi.length, 'titlehi'));
-      if (!hCollapsed && !collapsedSections.titlehi) {
-        for (const rule of titleHi) list.appendChild(renderRuleRow(rule));
-      }
-    }
-    if (!hCollapsed && companyHi.length === 0 && titleHi.length === 0) {
-      const empty = document.createElement('div');
-      empty.style.cssText = `color:${t().emptyText};font-size:12px;padding:6px 0 2px;`;
-      empty.textContent = 'No highlight rules yet.';
-      list.appendChild(empty);
+    list.appendChild(renderGroupHeader('Title Keywords', titleHi.length, 'titlehi'));
+    if (!collapsedSections.titlehi) {
+      for (const rule of titleHi) list.appendChild(renderRuleRow(rule));
     }
 
     updateDropdownBlockedOptions();
@@ -1272,16 +1445,16 @@
     const div = document.createElement('div');
     div.style.cssText = [
       'padding:8px 10px', 'margin-bottom:4px',
-      `background:${th.appliedBg}`, `border:1px solid ${th.appliedBorder}`, 'border-radius:5px',
+      `background:${th.dimRowBg}`, `border:1px solid ${th.dimRowBorder}`, 'border-radius:5px',
     ].join(';');
 
     const enabled = rule ? rule.enabled : true;
     div.innerHTML = `
 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-  <span style="font-size:12px;color:${th.appliedText};font-weight:600;flex:1;">LinkedIn Applied Label</span>
-  <button class="ljf-applied-dismiss" title="Dismiss all matching cards" style="
+  <span style="font-size:12px;color:${th.ruleLabel};font-weight:600;flex:1;">LinkedIn Applied Label</span>
+  ${dismissActionsEnabled ? `<button class="ljf-applied-dismiss" title="Dismiss all matching cards" style="
     flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
-    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>
+    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>` : ''}
   <button class="ljf-applied-toggle" title="${enabled ? 'Disable rule' : 'Enable rule'}" style="
     flex-shrink:0;border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
     font-size:13px;font-weight:900;line-height:1;text-align:center;
@@ -1302,7 +1475,7 @@
       }
     });
 
-    div.querySelector('.ljf-applied-dismiss').addEventListener('click', e => {
+    div.querySelector('.ljf-applied-dismiss')?.addEventListener('click', e => {
       e.stopPropagation();
       if (rule) {
         const dismissed = dismissRule(rule);
@@ -1319,18 +1492,18 @@
     const div = document.createElement('div');
     div.style.cssText = [
       'padding:8px 10px', 'margin-bottom:4px',
-      `background:${th.appliedBg}`, `border:1px solid ${th.appliedBorder}`, 'border-radius:5px',
+      `background:${th.logRowBg}`, `border:1px solid ${th.logRowBorder}`, 'border-radius:5px',
     ].join(';');
 
     div.innerHTML = `
-<div style="font-size:12px;color:${th.appliedText};font-weight:600;margin-bottom:5px;">Jobs Applied Log</div>
+<div style="font-size:12px;color:${th.ruleLabel};font-weight:600;margin-bottom:5px;">Jobs Applied Log</div>
 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-  <span style="font-size:12px;color:${th.appliedText};font-weight:600;flex:1;">
+  <span style="font-size:12px;color:${th.ruleLabel};font-weight:600;flex:1;">
     Job Log <span style="font-weight:400;font-size:10px;color:${th.countText};">(${count} entr${count !== 1 ? 'ies' : 'y'})</span>
   </span>
-  <button class="ljf-joblog-dismiss" title="Dismiss all matching cards" style="
+  ${dismissActionsEnabled ? `<button class="ljf-joblog-dismiss" title="Dismiss all matching cards" style="
     flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
-    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>
+    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>` : ''}
   <button class="ljf-joblog-toggle" title="${jobLogEnabled ? 'Disable job log matching' : 'Enable job log matching'}" style="
     flex-shrink:0;border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
     font-size:13px;font-weight:900;line-height:1;text-align:center;
@@ -1349,7 +1522,7 @@
       renderRules();
     });
 
-    div.querySelector('.ljf-joblog-dismiss').addEventListener('click', e => {
+    div.querySelector('.ljf-joblog-dismiss')?.addEventListener('click', e => {
       e.stopPropagation();
       const dismissed = dismissJobLog();
       setStatus('Job log \u2014 ' + dismissed + ' card(s) dismissed.');
@@ -1365,10 +1538,12 @@
     const display   = hasValue ? ('$' + rule.value + 'k') : 'Not set';
 
     const div = document.createElement('div');
+    const activeBg     = isHighlight ? th.hiRowBg     : th.dimRowBg;
+    const activeBorder = isHighlight ? th.hiRowBorder  : th.dimRowBorder;
     div.style.cssText = [
       'padding:8px 10px', 'margin-bottom:4px', 'cursor:pointer',
-      `background:${hasValue ? th.salaryOnBg : th.salaryOffBg}`,
-      `border:1px solid ${hasValue ? th.salaryOnBorder : th.salaryOffBorder}`,
+      `background:${hasValue ? activeBg : th.salaryOffBg}`,
+      `border:1px solid ${hasValue ? activeBorder : th.salaryOffBorder}`,
       'border-radius:5px',
     ].join(';');
 
@@ -1379,7 +1554,7 @@
     <div style="font-size:11px;color:${hasValue ? th.salaryOnVal : th.salaryOffVal};margin-top:2px;">${escHtml(display)}</div>
   </div>
   ${hasValue ? `
-  ${!isHighlight ? `<button class="ljf-salary-dismiss" title="Dismiss all matching cards" style="
+  ${(!isHighlight && dismissActionsEnabled) ? `<button class="ljf-salary-dismiss" title="Dismiss all matching cards" style="
     flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
     border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>` : ''}
   <button class="ljf-salary-clear" title="Remove this rule" style="
@@ -1440,7 +1615,7 @@
     ].join(';');
     div.innerHTML =
       `<span>${escHtml(label)}</span>` +
-      `<span style="margin-left:auto;font-size:10px;color:${th.arrowText};">${arrow}</span>`;
+      `<span style="font-size:22px;color:${th.arrowText};margin-left:4px;line-height:0;position:relative;top:-2px;">${arrow}</span>`;
     div.addEventListener('click', () => {
       if (sectionCollapsed) {
         // expand section and all subgroups
@@ -1470,8 +1645,9 @@
     div.innerHTML =
       `<span>${escHtml(label)}</span>` +
       `<span style="color:${th.countText};">(${count})</span>` +
-      `<span style="margin-left:auto;font-size:9px;color:${th.arrowText};">${arrow}</span>`;
+      (count > 0 ? `<span style="font-size:22px;color:${th.arrowText};margin-left:4px;line-height:0;position:relative;top:-2px;">${arrow}</span>` : '');
     div.addEventListener('click', () => {
+      if (count === 0) return;
       collapsedSections[sectionKey] = !collapsedSections[sectionKey];
       renderRules();
     });
@@ -1480,17 +1656,19 @@
 
   function renderRuleRow(rule) {
     const th = t();
+    const isHiRule  = !!RULE_TYPES[rule.type]?.highlight;
+    const rowBg     = isHiRule ? th.hiRowBg     : th.dimRowBg;
+    const rowBorder = isHiRule ? th.hiRowBorder  : th.dimRowBorder;
     const row = document.createElement('div');
     row.style.cssText = [
       'display:flex', 'align-items:center', 'gap:7px',
       'padding:7px 8px', 'margin-bottom:3px',
-      `background:${th.rowBg}`, `border:1px solid ${th.rowBorder}`,
+      `background:${rowBg}`, `border:1px solid ${rowBorder}`,
       'border-radius:4px',
     ].join(';');
 
     const safeLabel  = escHtml(rule.label);
     const typeLabel  = escHtml(RULE_TYPES[rule.type]?.label || rule.type);
-    const isHiRule   = !!RULE_TYPES[rule.type]?.highlight;
 
     row.innerHTML = `
 <input type="checkbox" class="ljf-toggle" data-id="${rule.id}"
@@ -1501,7 +1679,7 @@
     title="${safeLabel}">${safeLabel}</div>
   <div style="font-size:10px;color:${th.ruleType};margin-top:1px;">${typeLabel}</div>
 </div>
-${!isHiRule ? `<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss all matches for this rule" style="
+${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss all matches for this rule" style="
   background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};border-radius:3px;
   padding:3px 8px;cursor:pointer;font-size:10px;flex-shrink:0;white-space:nowrap;">✕ dismiss</button>` : ''}
 <button class="ljf-del" data-id="${rule.id}" title="Delete rule" style="
@@ -1600,6 +1778,7 @@ ${!isHiRule ? `<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss a
       const card = btn.closest(CARD_SEL);
       if (!card) return;
       currentCard = card;
+      qdBtn.style.display = dismissActionsEnabled ? 'flex' : 'none';
       menu.style.display = 'flex';
       requestAnimationFrame(() => {
         const rect = btn.getBoundingClientRect();
@@ -1619,6 +1798,7 @@ ${!isHiRule ? `<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss a
     const HOVER_SEL = DISMISS_SEL + ', ' + UNDO_SEL;
 
     document.addEventListener('mouseover', e => {
+      if (!hoverMenuEnabled) return;
       const btn = e.target.closest(HOVER_SEL);
       if (btn) showMenu(btn);
     });
@@ -1629,6 +1809,11 @@ ${!isHiRule ? `<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss a
 
     menu.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
     menu.addEventListener('mouseleave', scheduleHide);
+
+    document.addEventListener('scroll', () => {
+      menu.style.display = 'none';
+      currentCard = null;
+    }, { passive: true, capture: true });
 
     dismissPlusBtn.addEventListener('click', e => {
       e.stopPropagation();
@@ -1733,9 +1918,10 @@ ${!isHiRule ? `<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss a
     delete card.dataset.ljfHighlighted;
     delete card.dataset.ljfDismissed;
     delete card.dataset.ljfGreenMatch;
+    delete card.dataset.ljfRulesApplied;
     delete card.dataset.ljfJobLog;
     delete card.dataset.ljfJobLogLabel;
-    card.querySelector('.ljf-badge')?.remove();
+    card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
     const inner = card.querySelector('.job-card-container');
     if (inner) inner.style.removeProperty('border-left');
   }
