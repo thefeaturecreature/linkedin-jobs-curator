@@ -1,3 +1,4 @@
+// noinspection SpellCheckingInspection,JSUnresolvedVariable,DuplicatedCode,JSCheckFunctionSignatures
 // ==UserScript==
 // @name         LinkedIn Job Filter
 // @namespace    Monkey Scripts
@@ -27,17 +28,21 @@
   const UNDO_SEL    = 'button.artdeco-button--circle';   // undo/restore button shown after dismiss
 
   // Rule type definitions
-  // applied / salary / topsalary are rendered as permanent sticky blocks, not listed in dropdown
+  // applied / salarybelow / topsalarybelow are rendered as permanent sticky blocks, not listed in dropdown
   const RULE_TYPES = {
-    applied:   { label: 'Already Applied',       match: matchApplied    },
-    topsalary: { label: 'Top Salary Below ($k)',  match: matchTopSalary  },
-    salary:    { label: 'Salary Below ($k)',      match: matchSalary     },
-    company:   { label: 'Company Name',           match: matchCompany    },
-    title:     { label: 'Title Keyword',          match: matchTitle      },
+    applied:        { label: 'Already Applied',        match: matchApplied        },
+    topsalarybelow: { label: 'Top Salary Below ($k)',   match: matchTopSalary      },
+    salarybelow:    { label: 'Salary Below ($k)',        match: matchSalary         },
+    companydismiss: { label: 'Company to Dismiss',      match: matchCompany         },
+    titledismiss:   { label: 'Title to Dismiss',        match: matchTitle           },
+    companyhi:      { label: 'Company to Highlight',    match: matchCompanyHi,  highlight: true },
+    titlehi:        { label: 'Title to Highlight',      match: matchTitleHi,    highlight: true },
+    topsalaryabove: { label: 'Top Salary Above ($k)',   match: matchTopSalaryAbove, highlight: true },
+    salaryabove:    { label: 'Salary Above ($k)',        match: matchSalaryAbove,    highlight: true },
   };
 
   // Types shown in the add-rule dropdown (salary types conditionally disabled)
-  const DROPDOWN_TYPES = ['company', 'title', 'topsalary', 'salary'];
+  const DROPDOWN_TYPES = ['companydismiss', 'titledismiss', 'topsalarybelow', 'salarybelow', 'companyhi', 'titlehi', 'topsalaryabove', 'salaryabove'];
 
   const THEMES = {
     dark: {
@@ -90,7 +95,14 @@
   let panelOpen          = false;
   let editingRuleId      = null;
   let editingOrigType    = null;
-  let collapsedSections  = { company: false, title: false };
+  let collapsedSections  = {
+    dismissSection:   false,
+    companydismiss:   false,
+    titledismiss:     false,
+    highlightSection: false,
+    companyhi:        false,
+    titlehi:          false,
+  };
   let darkMode           = GM_getValue('ljf_darkMode', 'dark') !== 'light';
 
   function t() { return darkMode ? THEMES.dark : THEMES.light; }
@@ -165,6 +177,28 @@
     const title = normalizeSenior(cardText(card, TITLE_SEL));
     const value = normalizeSenior(rule.value);
     return title.toLowerCase().includes(value.toLowerCase());
+  }
+
+  function matchCompanyHi(card, rule) {
+    return matchCompany(card, rule);
+  }
+
+  function matchTitleHi(card, rule) {
+    return matchTitle(card, rule);
+  }
+
+  function matchSalaryAbove(card, rule) {
+    const threshold = parseFloat(rule.value) * 1000;
+    if (isNaN(threshold)) return false;
+    const s = parseSalaries(card);
+    return s.length > 0 && Math.min(...s) >= threshold;
+  }
+
+  function matchTopSalaryAbove(card, rule) {
+    const threshold = parseFloat(rule.value) * 1000;
+    if (isNaN(threshold)) return false;
+    const s = parseSalaries(card);
+    return s.length > 0 && Math.max(...s) >= threshold;
   }
 
   function normalizeUnit(unit) {
@@ -254,11 +288,15 @@
 
   function applyRule(rule) {
     if (!rule.enabled) return { matched: 0 };
-    const matcher = RULE_TYPES[rule.type]?.match;
-    if (!matcher) return { matched: 0 };
+    const typeDef = RULE_TYPES[rule.type];
+    if (!typeDef) return { matched: 0 };
+    const { match: matcher, highlight: isHighlight } = typeDef;
     let matched = 0;
     for (const card of getCards()) {
-      if (matcher(card, rule)) { matched++; act(card, rule); }
+      if (matcher(card, rule)) {
+        matched++;
+        if (isHighlight) actHighlight(card, rule); else act(card, rule);
+      }
     }
     return { matched };
   }
@@ -300,7 +338,7 @@
     const badge = document.createElement('span');
     badge.className = 'ljf-badge';
     badge.style.cssText = [
-      'position:absolute', 'bottom:6px', 'right:5px',
+      'position:absolute', 'bottom:6px', 'right:20px',
       'background:rgba(80,80,90,0.72)', 'color:#fff',
       'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
       'pointer-events:none', 'z-index:9999',
@@ -327,13 +365,18 @@
     card.dataset.ljfJobLogLabel = '1';
   }
 
+  function clearInnerBorder(card) {
+    const inner = card.querySelector('.job-card-container');
+    if (inner) inner.style.setProperty('border-left', 'none', 'important');
+  }
+
   function act(card, rule) {
     if (!card.querySelector('.ljf-badge')) {
       const badge = document.createElement('span');
       badge.className = 'ljf-badge';
       badge.textContent = '\u26F3 ' + rule.label;
       badge.style.cssText = [
-        'position:absolute', 'bottom:6px', 'right:5px',
+        'position:absolute', 'bottom:6px', 'right:20px',
         'background:rgba(180,30,30,0.80)', 'color:#fff',
         'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
         'pointer-events:none', 'z-index:9999',
@@ -349,23 +392,58 @@
       card.style.setProperty('background-color', 'rgba(200,40,40,0.10)', 'important');
       card.style.setProperty('border-left', '3px solid rgba(200,40,40,0.55)', 'important');
       card.style.setProperty('box-sizing', 'border-box', 'important');
+      clearInnerBorder(card);
       card.dataset.ljfHighlighted = rule.id;
     }
   }
 
+  function actHighlight(card, rule) {
+    if (isDismissed(card)) return;
+    if (card.dataset.ljfHighlighted) return; // dismiss match takes precedence
+
+    const logEntry        = matchJobLog(card);
+    const recentDays      = logEntry ? daysAgo(logEntry.date) : null;
+    const recentlyApplied = recentDays !== null && recentDays < 14;
+
+    const bgColor     = recentlyApplied ? 'rgba(40,160,40,0.05)' : 'rgba(40,180,40,0.11)';
+    const borderColor = recentlyApplied ? 'rgba(40,160,40,0.28)' : 'rgba(40,180,40,0.55)';
+    const badgeBg     = recentlyApplied ? 'rgba(30,120,30,0.58)' : 'rgba(30,150,30,0.82)';
+
+    if (!card.querySelector('.ljf-badge')) {
+      const badge = document.createElement('span');
+      badge.className = 'ljf-badge';
+      badge.textContent = '\u2605 ' + rule.label;
+      badge.style.cssText = [
+        'position:absolute', 'bottom:6px', 'right:20px',
+        `background:${badgeBg}`, 'color:#fff',
+        'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
+        'pointer-events:none', 'z-index:9999',
+        'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
+      ].join(';');
+      card.style.position = 'relative';
+      card.appendChild(badge);
+    }
+    card.style.setProperty('background-color', bgColor, 'important');
+    card.style.setProperty('border-left', `3px solid ${borderColor}`, 'important');
+    card.style.setProperty('box-sizing', 'border-box', 'important');
+    clearInnerBorder(card);
+    card.dataset.ljfGreenMatch = rule.id;
+  }
+
   function actJobLog(card, entry) {
     if (isDismissed(card)) { markDismissed(card); return; }
-    const alreadyRed = !!card.dataset.ljfHighlighted;
+    const alreadyRed   = !!card.dataset.ljfHighlighted;
+    const alreadyGreen = !!card.dataset.ljfGreenMatch;
     const dateStr    = entry.date || '';
     const badgeText  = 'Applied' + (dateStr ? ' on ' + dateStr : '');
-    const badgeBg    = alreadyRed ? 'rgba(180,30,30,0.80)' : 'rgba(160,130,0,0.88)';
+    const badgeBg    = alreadyRed ? 'rgba(180,30,30,0.80)' : alreadyGreen ? 'rgba(30,120,30,0.70)' : 'rgba(160,130,0,0.88)';
 
     let badge = card.querySelector('.ljf-badge');
     if (!badge) {
       badge = document.createElement('span');
       badge.className = 'ljf-badge';
       badge.style.cssText = [
-        'position:absolute', 'bottom:6px', 'right:5px',
+        'position:absolute', 'bottom:6px', 'right:20px',
         'color:#fff', 'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
         'pointer-events:none', 'z-index:9999',
         'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
@@ -376,7 +454,7 @@
     badge.textContent = badgeText;
     badge.style.background = badgeBg;
 
-    if (!alreadyRed) {
+    if (!alreadyRed && !alreadyGreen) {
       card.style.setProperty('background-color', 'rgba(200,170,0,0.13)', 'important');
       card.style.setProperty('border-left', '3px solid rgba(200,170,0,0.60)', 'important');
       card.style.setProperty('box-sizing', 'border-box', 'important');
@@ -430,10 +508,18 @@
   }
 
   function updateTabCount() {
-    const el = document.getElementById('ljf-tab-count');
-    if (!el) return;
-    const n = [...getCards()].filter(c => (c.dataset.ljfHighlighted || c.dataset.ljfJobLog) && !isDismissed(c)).length;
-    el.textContent = n > 0 ? n : '';
+    const cards = [...getCards()];
+    const redEl   = document.getElementById('ljf-tab-count');
+    const greenEl = document.getElementById('ljf-tab-count-green');
+    if (redEl) {
+      const n = cards.filter(c => (c.dataset.ljfHighlighted || c.dataset.ljfJobLog) && !isDismissed(c)).length;
+      redEl.textContent = n > 0 ? n : '';
+    }
+    if (greenEl) {
+      const n = cards.filter(c => c.dataset.ljfGreenMatch && !isDismissed(c)).length;
+      greenEl.textContent = n > 0 ? n : '';
+      greenEl.style.display = n > 0 ? '' : 'none';
+    }
   }
 
   function clearHighlights() {
@@ -443,6 +529,7 @@
       card.style.removeProperty('box-sizing');
       delete card.dataset.ljfHighlighted;
       delete card.dataset.ljfDismissed;
+      delete card.dataset.ljfGreenMatch;
       card.querySelector('.ljf-badge')?.remove();
       delete card.dataset.ljfJobLog;
       delete card.dataset.ljfJobLogLabel;
@@ -450,12 +537,26 @@
     updateTabCount();
   }
 
+  // Clears ljfDismissed on any card we marked as dismissed but LinkedIn has since restored.
+  // Detected by: undo button gone AND dismiss button back — meaning LinkedIn processed the undo.
+  function reconcileDismissedCards() {
+    for (const card of getCards()) {
+      if (card.dataset.ljfDismissed) {
+        const hasUndo    = !!card.querySelector(UNDO_SEL);
+        const hasDismiss = !!card.querySelector(DISMISS_SEL);
+        if (hasDismiss && !hasUndo) {
+          delete card.dataset.ljfDismissed;
+        }
+      }
+    }
+  }
+
   // ─── MutationObserver ─────────────────────────────────────────────────────────
 
   let scanTimeout = null;
   const observer = new MutationObserver(() => {
     clearTimeout(scanTimeout);
-    scanTimeout = setTimeout(applyAllRules, 700);
+    scanTimeout = setTimeout(() => { reconcileDismissedCards(); applyAllRules(); }, 700);
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
@@ -467,12 +568,13 @@
     tab.title = 'LinkedIn Job Filter';
     tab.innerHTML =
       '<span id="ljf-tab-flag" style="font-size:15px;line-height:1;color:#4e7af7;">&#9873;</span>' +
-      '<span id="ljf-tab-count" style="font-size:10px;font-weight:700;line-height:1;margin-top:2px;"></span>' +
+      '<span id="ljf-tab-count" title="Flagged cards" style="font-size:10px;font-weight:700;line-height:1;margin-top:2px;"></span>' +
       '<button id="ljf-tab-dismiss" title="Dismiss All" style="' +
         'margin-top:5px;margin-left:1px;background:#4e7af7;color:#c7d6ff;border:none;' +
         'border-radius:10px;width:20px;height:20px;cursor:pointer;' +
         'font-size:11px;font-weight:700;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;' +
-      '">&#10005;</button>';
+      '">&#10005;</button>' +
+      '<span id="ljf-tab-count-green" title="Highlighted cards" style="font-size:10px;font-weight:700;line-height:1;margin-top:4px;color:#4e7af7;display:none;"></span>';
     tab.style.cssText = [
       'position:fixed', 'right:0', 'top:50%',
       'transform:translateY(-50%)',
@@ -522,7 +624,9 @@
     document.getElementById('ljf-tab-dismiss').addEventListener('click', e => {
       e.stopPropagation();
       let dismissed = 0;
-      for (const rule of rules) dismissed += dismissRule(rule);
+      for (const rule of rules) {
+        if (!RULE_TYPES[rule.type]?.highlight) dismissed += dismissRule(rule);
+      }
       if (jobLogEnabled) dismissed += dismissJobLog();
       updateTabCount();
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
@@ -644,7 +748,7 @@
     document.getElementById('ljf-quick-dismiss').addEventListener('click', () => {
       const company = document.getElementById('ljf-quick-company').value.trim();
       if (!company) { setStatus('\u26A0 Enter a company name.'); return; }
-      const dismissed = dismissRule({ type: 'company', value: company, label: 'Quick: ' + company });
+      const dismissed = dismissRule({ type: 'companydismiss', value: company, label: 'Quick: ' + company });
       document.getElementById('ljf-quick-company').value = '';
       setStatus('Quick dismiss: ' + dismissed + ' card(s) dismissed.');
     });
@@ -783,7 +887,7 @@
     const sel = document.getElementById('ljf-type-sel');
     if (!sel) return;
     for (const opt of sel.options) {
-      if (opt.value === 'salary' || opt.value === 'topsalary') {
+      if (opt.value === 'salarybelow' || opt.value === 'topsalarybelow' || opt.value === 'salaryabove' || opt.value === 'topsalaryabove') {
         const existing = rules.find(r => r.type === opt.value);
         opt.disabled = !!(existing && editingRuleId !== existing.id);
       }
@@ -794,7 +898,7 @@
     const sel = document.getElementById('ljf-type-sel');
     const labelInput = document.getElementById('ljf-label-input');
     if (!sel || !labelInput) return;
-    const hide = sel.value === 'salary' || sel.value === 'topsalary';
+    const hide = sel.value === 'salarybelow' || sel.value === 'topsalarybelow' || sel.value === 'salaryabove' || sel.value === 'topsalaryabove';
     labelInput.style.display = hide ? 'none' : '';
   }
 
@@ -808,7 +912,7 @@
     if (!value) { setStatus('\u26A0 Enter a value first.'); return; }
 
     const typeLabel  = RULE_TYPES[type]?.label || type;
-    const isSalary   = type === 'salary' || type === 'topsalary';
+    const isSalary   = type === 'salarybelow' || type === 'topsalarybelow' || type === 'salaryabove' || type === 'topsalaryabove';
     const finalLabel = isSalary
       ? typeLabel + ': ' + value
       : (label || typeLabel + ': ' + value);
@@ -837,11 +941,12 @@
 
   function exportRules() {
     const payload = {
-      script:   'LinkedIn Job Filter',
-      source:   SOURCE_URL,
-      exported: new Date().toISOString(),
-      darkMode: darkMode ? 'dark' : 'light',
-      rules:    rules,
+      script:        'LinkedIn Job Filter',
+      source:        SOURCE_URL,
+      exported:      new Date().toISOString(),
+      darkMode:      darkMode ? 'dark' : 'light',
+      jobLogEnabled: jobLogEnabled,
+      rules:         rules,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
@@ -868,7 +973,7 @@
             setStatus('\u26A0 No rules found in file.');
             return;
           }
-          showImportDialog(data.rules, data.darkMode);
+          showImportDialog(data.rules, data.darkMode, data.jobLogEnabled);
         } catch {
           setStatus('\u26A0 Failed to parse rules file.');
         }
@@ -878,7 +983,25 @@
     input.click();
   }
 
-  function showImportDialog(incoming, importedDarkMode) {
+  function deduplicateRules(arr) {
+    const seen = new Set();
+    return arr.filter(r => {
+      // For singleton types, keep only the first occurrence (prefer enabled)
+      const singletonTypes = ['applied', 'salarybelow', 'topsalarybelow', 'salaryabove', 'topsalaryabove'];
+      if (singletonTypes.includes(r.type)) {
+        if (seen.has(r.type)) return false;
+        seen.add(r.type);
+        return true;
+      }
+      // For value-based types, deduplicate by type+value
+      const key = r.type + '|' + r.value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function showImportDialog(incoming, importedDarkMode, importedJobLogEnabled) {
     const th = t();
     const overlay = document.createElement('div');
     overlay.style.cssText = [
@@ -922,7 +1045,7 @@
       return arr.map(r => ({ ...r, id: ++id }));
     };
 
-    const applyImportedTheme = () => {
+    const applyImportedSettings = () => {
       if (importedDarkMode === 'dark' || importedDarkMode === 'light') {
         const newDark = importedDarkMode !== 'light';
         if (newDark !== darkMode) {
@@ -930,14 +1053,19 @@
           GM_setValue('ljf_darkMode', importedDarkMode);
         }
       }
+      if (importedJobLogEnabled === true || importedJobLogEnabled === false) {
+        jobLogEnabled = importedJobLogEnabled;
+        GM_setValue('ljf_jobLogEnabled', jobLogEnabled ? 'true' : 'false');
+      }
     };
 
     modal.querySelector('#ljf-imp-cancel').addEventListener('click', () => overlay.remove());
 
     modal.querySelector('#ljf-imp-append').addEventListener('click', () => {
       rules.push(...freshIds(incoming));
+      rules = deduplicateRules(rules);
       saveRules();
-      applyImportedTheme();
+      applyImportedSettings();
       overlay.remove();
       buildPanelContent();
       clearHighlights();
@@ -946,9 +1074,9 @@
     });
 
     modal.querySelector('#ljf-imp-overwrite').addEventListener('click', () => {
-      rules = freshIds(incoming);
+      rules = deduplicateRules(freshIds(incoming));
       saveRules();
-      applyImportedTheme();
+      applyImportedSettings();
       overlay.remove();
       buildPanelContent();
       clearHighlights();
@@ -1071,34 +1199,68 @@
     if (!list) return;
     list.innerHTML = '';
 
-    // ── 1. Always-visible sticky blocks ──────────────────────────────────────
-    list.appendChild(renderAppliedBlock(rules.find(r => r.type === 'applied')));
-    list.appendChild(renderJobLogBlock());
-    list.appendChild(renderSalaryBlock('topsalary', rules.find(r => r.type === 'topsalary')));
-    list.appendChild(renderSalaryBlock('salary',    rules.find(r => r.type === 'salary')));
+    const companyDismiss = rules.filter(r => r.type === 'companydismiss');
+    const titleDismiss   = rules.filter(r => r.type === 'titledismiss');
+    const companyHi      = rules.filter(r => r.type === 'companyhi');
+    const titleHi        = rules.filter(r => r.type === 'titlehi');
 
-    // ── 2. Dynamic rules grouped by type ─────────────────────────────────────
-    const companyRules = rules.filter(r => r.type === 'company');
-    const titleRules   = rules.filter(r => r.type === 'title');
-
-    if (companyRules.length === 0 && titleRules.length === 0) {
+    // ── Dismiss Rules ─────────────────────────────────────────────────────────
+    const dCollapsed = collapsedSections.dismissSection;
+    list.appendChild(renderSectionHeader('Dismiss Rules', 'dismissSection', ['companydismiss', 'titledismiss']));
+    if (!dCollapsed) {
+      list.appendChild(renderAppliedBlock(rules.find(r => r.type === 'applied')));
+      list.appendChild(renderJobLogBlock());
+      list.appendChild(renderSalaryBlock('topsalarybelow', rules.find(r => r.type === 'topsalarybelow')));
+      list.appendChild(renderSalaryBlock('salarybelow',    rules.find(r => r.type === 'salarybelow')));
+    }
+    if (companyDismiss.length > 0) {
+      list.appendChild(renderGroupHeader('Companies', companyDismiss.length, 'companydismiss'));
+      if (!dCollapsed && !collapsedSections.companydismiss) {
+        for (const rule of companyDismiss) list.appendChild(renderRuleRow(rule));
+      }
+    }
+    if (titleDismiss.length > 0) {
+      list.appendChild(renderGroupHeader('Title Keywords', titleDismiss.length, 'titledismiss'));
+      if (!dCollapsed && !collapsedSections.titledismiss) {
+        for (const rule of titleDismiss) list.appendChild(renderRuleRow(rule));
+      }
+    }
+    if (!dCollapsed && companyDismiss.length === 0 && titleDismiss.length === 0) {
       const empty = document.createElement('div');
-      empty.style.cssText = `color:${t().emptyText};font-size:12px;padding:10px 0;`;
-      empty.textContent = 'No rules yet. Add one below.';
+      empty.style.cssText = `color:${t().emptyText};font-size:12px;padding:6px 0 2px;`;
+      empty.textContent = 'No dismiss rules yet.';
       list.appendChild(empty);
-    } else {
-      if (companyRules.length > 0) {
-        list.appendChild(renderGroupHeader('Companies', companyRules.length, 'company'));
-        if (!collapsedSections.company) {
-          for (const rule of companyRules) list.appendChild(renderRuleRow(rule));
-        }
+    }
+
+    // ── Divider ───────────────────────────────────────────────────────────────
+    const divider = document.createElement('div');
+    divider.style.cssText = `border-top:1px solid ${t().border1};margin:10px 0 2px;`;
+    list.appendChild(divider);
+
+    // ── Highlight Rules ───────────────────────────────────────────────────────
+    const hCollapsed = collapsedSections.highlightSection;
+    list.appendChild(renderSectionHeader('Highlight Rules', 'highlightSection', ['companyhi', 'titlehi']));
+    if (!hCollapsed) {
+      list.appendChild(renderSalaryBlock('topsalaryabove', rules.find(r => r.type === 'topsalaryabove'), true));
+      list.appendChild(renderSalaryBlock('salaryabove',    rules.find(r => r.type === 'salaryabove'),    true));
+    }
+    if (companyHi.length > 0) {
+      list.appendChild(renderGroupHeader('Companies', companyHi.length, 'companyhi'));
+      if (!hCollapsed && !collapsedSections.companyhi) {
+        for (const rule of companyHi) list.appendChild(renderRuleRow(rule));
       }
-      if (titleRules.length > 0) {
-        list.appendChild(renderGroupHeader('Title Keywords', titleRules.length, 'title'));
-        if (!collapsedSections.title) {
-          for (const rule of titleRules) list.appendChild(renderRuleRow(rule));
-        }
+    }
+    if (titleHi.length > 0) {
+      list.appendChild(renderGroupHeader('Title Keywords', titleHi.length, 'titlehi'));
+      if (!hCollapsed && !collapsedSections.titlehi) {
+        for (const rule of titleHi) list.appendChild(renderRuleRow(rule));
       }
+    }
+    if (!hCollapsed && companyHi.length === 0 && titleHi.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = `color:${t().emptyText};font-size:12px;padding:6px 0 2px;`;
+      empty.textContent = 'No highlight rules yet.';
+      list.appendChild(empty);
     }
 
     updateDropdownBlockedOptions();
@@ -1196,7 +1358,7 @@
     return div;
   }
 
-  function renderSalaryBlock(type, rule) {
+  function renderSalaryBlock(type, rule, isHighlight = false) {
     const th = t();
     const typeLabel = RULE_TYPES[type].label;
     const hasValue  = !!(rule && rule.value);
@@ -1217,9 +1379,9 @@
     <div style="font-size:11px;color:${hasValue ? th.salaryOnVal : th.salaryOffVal};margin-top:2px;">${escHtml(display)}</div>
   </div>
   ${hasValue ? `
-  <button class="ljf-salary-dismiss" title="Dismiss all matching cards" style="
+  ${!isHighlight ? `<button class="ljf-salary-dismiss" title="Dismiss all matching cards" style="
     flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
-    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>
+    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>` : ''}
   <button class="ljf-salary-clear" title="Remove this rule" style="
     flex-shrink:0;background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};
     border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
@@ -1264,6 +1426,36 @@
     return div;
   }
 
+  // subKeys: the two group keys controlled by this section header
+  function renderSectionHeader(label, sectionKey, subKeys) {
+    const th = t();
+    const sectionCollapsed = collapsedSections[sectionKey];
+    const arrow = sectionCollapsed ? '▸' : '▾';
+    const div = document.createElement('div');
+    div.style.cssText = [
+      'display:flex', 'align-items:center', 'gap:6px',
+      `font-size:11px;color:${th.panelText}`, 'font-weight:700',
+      'text-transform:uppercase', 'letter-spacing:.7px',
+      'padding:6px 0 5px', 'cursor:pointer', 'user-select:none',
+    ].join(';');
+    div.innerHTML =
+      `<span>${escHtml(label)}</span>` +
+      `<span style="margin-left:auto;font-size:10px;color:${th.arrowText};">${arrow}</span>`;
+    div.addEventListener('click', () => {
+      if (sectionCollapsed) {
+        // expand section and all subgroups
+        collapsedSections[sectionKey] = false;
+        for (const k of subKeys) collapsedSections[k] = false;
+      } else {
+        // collapse section (hides stickies + all subgroup rows)
+        collapsedSections[sectionKey] = true;
+        for (const k of subKeys) collapsedSections[k] = true;
+      }
+      renderRules();
+    });
+    return div;
+  }
+
   function renderGroupHeader(label, count, sectionKey) {
     const th = t();
     const collapsed = collapsedSections[sectionKey];
@@ -1296,8 +1488,9 @@
       'border-radius:4px',
     ].join(';');
 
-    const safeLabel = escHtml(rule.label);
-    const typeLabel = escHtml(RULE_TYPES[rule.type]?.label || rule.type);
+    const safeLabel  = escHtml(rule.label);
+    const typeLabel  = escHtml(RULE_TYPES[rule.type]?.label || rule.type);
+    const isHiRule   = !!RULE_TYPES[rule.type]?.highlight;
 
     row.innerHTML = `
 <input type="checkbox" class="ljf-toggle" data-id="${rule.id}"
@@ -1308,9 +1501,9 @@
     title="${safeLabel}">${safeLabel}</div>
   <div style="font-size:10px;color:${th.ruleType};margin-top:1px;">${typeLabel}</div>
 </div>
-<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss all matches for this rule" style="
+${!isHiRule ? `<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss all matches for this rule" style="
   background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};border-radius:3px;
-  padding:3px 8px;cursor:pointer;font-size:10px;flex-shrink:0;white-space:nowrap;">✕ dismiss</button>
+  padding:3px 8px;cursor:pointer;font-size:10px;flex-shrink:0;white-space:nowrap;">✕ dismiss</button>` : ''}
 <button class="ljf-del" data-id="${rule.id}" title="Delete rule" style="
   flex-shrink:0;background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};
   border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
@@ -1325,7 +1518,7 @@
       applyAllRules();
     });
 
-    row.querySelector('.ljf-run-one').addEventListener('click', e => {
+    row.querySelector('.ljf-run-one')?.addEventListener('click', e => {
       e.stopPropagation();
       const dismissed = dismissRule(rule);
       setStatus('"' + rule.label + '" \u2014 ' + dismissed + ' card(s) dismissed.');
@@ -1362,30 +1555,40 @@
     menu.id = 'ljf-hover-menu';
     menu.style.cssText = [
       'position:fixed', 'z-index:99997',
-      'display:none', 'flex-direction:column', 'gap:4px',
+      'display:none', 'flex-direction:column', 'align-items:center', 'gap:4px',
       'background:none', 'border:none', 'padding:0',
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
     ].join(';');
 
+    const topRow = document.createElement('div');
+    topRow.style.cssText = 'display:flex;flex-direction:row;gap:6px;';
+
     const btnBase = [
       'width:25px', 'height:25px', 'padding:0', 'border-radius:50%',
-      'cursor:pointer', 'font-size:11px', 'font-weight:700',
+      'cursor:pointer', 'font-size:14px', 'font-weight:700',
       'line-height:1', 'text-align:center',
       'box-shadow:0 1px 4px rgba(0,0,0,.35)',
       'display:flex', 'align-items:center', 'justify-content:center',
     ].join(';');
 
-    const addBtn = document.createElement('button');
-    addBtn.title = 'Add company rule';
-    addBtn.textContent = '+';
-    addBtn.style.cssText = btnBase + ';background:#166534;color:#fff;border:none;font-size:14px;';
+    const dismissPlusBtn = document.createElement('button');
+    dismissPlusBtn.title = 'Add to dismiss rules';
+    dismissPlusBtn.textContent = '+';
+    dismissPlusBtn.style.cssText = btnBase + ';background:#991b1b;color:#fff;border:none;';
+
+    const highlightPlusBtn = document.createElement('button');
+    highlightPlusBtn.title = 'Add to highlight rules';
+    highlightPlusBtn.textContent = '+';
+    highlightPlusBtn.style.cssText = btnBase + ';background:#166534;color:#fff;border:none;';
 
     const qdBtn = document.createElement('button');
     qdBtn.title = 'Quick dismiss this company';
     qdBtn.textContent = '\u00BB';
-    qdBtn.style.cssText = btnBase + ';background:#854d0e;color:#fff;border:none;';
+    qdBtn.style.cssText = btnBase + ';background:#854d0e;color:#fff;border:none;font-size:11px;';
 
-    menu.appendChild(addBtn);
+    topRow.appendChild(dismissPlusBtn);
+    topRow.appendChild(highlightPlusBtn);
+    menu.appendChild(topRow);
     menu.appendChild(qdBtn);
     document.body.appendChild(menu);
 
@@ -1427,22 +1630,39 @@
     menu.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
     menu.addEventListener('mouseleave', scheduleHide);
 
-    addBtn.addEventListener('click', e => {
+    dismissPlusBtn.addEventListener('click', e => {
       e.stopPropagation();
       menu.style.display = 'none';
       if (!currentCard) return;
       const company = cardText(currentCard, COMPANY_SEL);
       if (!company) { setStatus('\u26A0 Could not detect company name.'); return; }
-      if (rules.find(r => r.type === 'company' && r.value.toLowerCase() === company.toLowerCase())) {
-        setStatus('\u26A0 Rule already exists for: ' + company);
+      if (rules.find(r => r.type === 'companydismiss' && r.value.toLowerCase() === company.toLowerCase())) {
+        setStatus('\u26A0 Dismiss rule already exists for: ' + company);
         return;
       }
-      const newRule = addRule('company', company, 'Company Name: ' + company);
+      const newRule = addRule('companydismiss', company, 'Company Name: ' + company);
       clearHighlights();
       applyAllRules();
       const dismissed = dismissRule(newRule);
       if (panelOpen) renderRules();
-      setStatus('Rule added \u2014 ' + dismissed + ' card(s) dismissed for ' + company);
+      setStatus('Dismiss rule added \u2014 ' + dismissed + ' card(s) dismissed for ' + company);
+    });
+
+    highlightPlusBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      menu.style.display = 'none';
+      if (!currentCard) return;
+      const company = cardText(currentCard, COMPANY_SEL);
+      if (!company) { setStatus('\u26A0 Could not detect company name.'); return; }
+      if (rules.find(r => r.type === 'companyhi' && r.value.toLowerCase() === company.toLowerCase())) {
+        setStatus('\u26A0 Highlight rule already exists for: ' + company);
+        return;
+      }
+      addRule('companyhi', company, 'Company to Highlight: ' + company);
+      clearHighlights();
+      applyAllRules();
+      if (panelOpen) renderRules();
+      setStatus('Highlight rule added for ' + company);
     });
 
     qdBtn.addEventListener('click', e => {
@@ -1451,7 +1671,7 @@
       if (!currentCard) return;
       const company = cardText(currentCard, COMPANY_SEL);
       if (!company) { setStatus('\u26A0 Could not detect company name.'); return; }
-      const dismissed = dismissRule({ type: 'company', value: company, label: 'Quick: ' + company });
+      const dismissed = dismissRule({ type: 'companydismiss', value: company, label: 'Quick: ' + company });
       setStatus('Quick dismiss \u2014 ' + dismissed + ' card(s) for ' + company);
     });
   }
@@ -1493,12 +1713,42 @@
     clearHighlights();
     applyAllRules();
     if (panelOpen) renderRules();
-    setStatus('\u2713 Logged: ' + (title || company));
+
+    const htmlText = '<table><tr><td>' + company + '</td><td>' + title + '</td><td><a href="' + url + '">' + url + '</a></td></tr></table>';
+    const plainText = company + '\t' + title + '\t' + url;
+    navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html':  new Blob([htmlText],  { type: 'text/html' }),
+        'text/plain': new Blob([plainText], { type: 'text/plain' }),
+      }),
+    ]).catch(() => navigator.clipboard.writeText(plainText));
+
+    setStatus('\u2713 Logged & copied: ' + (title || company));
   }
 
-  function setupApplyCapture() {
+  function resetCard(card) {
+    card.style.removeProperty('background-color');
+    card.style.removeProperty('border-left');
+    card.style.removeProperty('box-sizing');
+    delete card.dataset.ljfHighlighted;
+    delete card.dataset.ljfDismissed;
+    delete card.dataset.ljfGreenMatch;
+    delete card.dataset.ljfJobLog;
+    delete card.dataset.ljfJobLogLabel;
+    card.querySelector('.ljf-badge')?.remove();
+    const inner = card.querySelector('.job-card-container');
+    if (inner) inner.style.removeProperty('border-left');
+  }
+
+function setupApplyCapture() {
     document.addEventListener('click', e => {
       if (e.target.closest(YES_BTN_SEL) || e.target.closest(EASY_APPLY_SUBMIT)) captureAppliedJob();
+      const undoBtn = e.target.closest(UNDO_SEL);
+      if (undoBtn) {
+        const card = undoBtn.closest(CARD_SEL);
+        if (card) resetCard(card);
+        setTimeout(() => { clearHighlights(); applyAllRules(); }, 400);
+      }
     }, true);
   }
 
