@@ -2,9 +2,10 @@
 // ==UserScript==
 // @name         LinkedIn Job Filter
 // @namespace    Monkey Scripts
-// @version      1.3.0
+// @version      1.3.3
 // @description  DOM-only job card filtering with rule manager overlay
 // @match        https://www.linkedin.com/jobs/*
+// @match        https://www.linkedin.com/my-items/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @run-at       document-idle
@@ -26,6 +27,11 @@
   const APPLIED_SEL = '.job-card-container__footer-job-state';
   const DISMISS_SEL = 'button.job-card-container__action';
   const UNDO_SEL    = 'button.artdeco-button--circle';   // undo/restore button shown after dismiss
+
+  // Saved-jobs page (/my-items/saved-jobs/)
+  const SAVED_CARD_SEL    = '[data-chameleon-result-urn^="urn:li:fsd_jobPosting:"]';
+  const SAVED_TITLE_SEL   = '.t-16 a';
+  const SAVED_COMPANY_SEL = '.t-14.t-black.t-normal';
 
   // Rule type definitions
   // applied / salarybelow / topsalarybelow are rendered as permanent sticky blocks, not listed in dropdown
@@ -124,6 +130,8 @@
   let jobLogEnabled         = GM_getValue('ljf_jobLogEnabled', 'true') !== 'false';
   let dismissActionsEnabled = GM_getValue('ljf_dismissActions', 'false') === 'true';
   let panelOpen          = false;
+  let activePanel        = GM_getValue('ljf_activePanel', 'rules');
+  let jobSort            = { col: 'date', dir: 'desc' };
   let editingRuleId      = null;
   let editingOrigType    = null;
   let collapsedSections  = {
@@ -138,6 +146,485 @@
   let hoverMenuEnabled   = GM_getValue('ljf_hoverMenu', 'true') !== 'false';
 
   function t() { return darkMode ? THEMES.dark : THEMES.light; }
+
+  const PANEL_WIDTHS = { rules: 340, jobs: 630 };
+  function panelWidthPx() { return (PANEL_WIDTHS[activePanel] || 340) + 'px'; }
+
+  // ─── Panel styles ─────────────────────────────────────────────────────────────
+
+  function buildPanelStyles() {
+    let el = document.getElementById('ljf-styles');
+    if (!el) { el = document.createElement('style'); el.id = 'ljf-styles'; document.head.appendChild(el); }
+    el.textContent = `
+/* LinkedIn Job Filter — all selectors scoped to #ljf-panel */
+#ljf-panel .ljf-header {
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 14px;flex-shrink:0;cursor:pointer;
+  background:var(--ljf-header-bg);border-bottom:1px solid var(--ljf-border1); }
+#ljf-panel .ljf-header strong { font-size:14px;letter-spacing:.3px; }
+#ljf-panel .ljf-header-btns { display:flex;align-items:center;gap:2px; }
+#ljf-panel .ljf-gear {
+  background:none;border:none;cursor:pointer;
+  font-size:15px;padding:2px 4px;line-height:1;border-radius:3px;
+  color:var(--ljf-gear-text); }
+#ljf-panel .ljf-help {
+  background:none;border:none;cursor:pointer;
+  font-size:12px;font-weight:700;padding:2px 5px;line-height:1;border-radius:3px;
+  color:var(--ljf-gear-text); }
+#ljf-panel .ljf-tab-bar {
+  display:flex;flex-shrink:0;
+  background:var(--ljf-header-bg);border-bottom:1px solid var(--ljf-border1); }
+#ljf-panel .ljf-tab-btn {
+  flex:1;padding:8px 4px;border:none;border-bottom:2px solid transparent;
+  background:transparent;color:var(--ljf-count-text);
+  cursor:pointer;font-size:12px;font-weight:600;letter-spacing:.2px;
+  transition:color .15s,border-color .15s; }
+#ljf-panel .ljf-tab-btn.ljf-active {
+  border-bottom-color:var(--ljf-tab-accent);
+  background:var(--ljf-panel-bg);color:var(--ljf-label-text); }
+#ljf-panel .ljf-pane { display:none;flex-direction:column;flex:1;min-height:0; }
+#ljf-panel .ljf-pane.ljf-active { display:flex; }
+#ljf-panel .ljf-status-bar {
+  padding:5px 14px;font-size:11px;flex-shrink:0;
+  background:var(--ljf-status-bg);color:var(--ljf-status-text);
+  border-top:1px solid var(--ljf-border3); }
+#ljf-panel .ljf-action-bar {
+  padding:10px 14px;border-bottom:1px solid var(--ljf-border2);flex-shrink:0; }
+#ljf-panel .ljf-action-btn {
+  width:100%;border-radius:4px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid;
+  background:var(--ljf-dismiss-bg);color:var(--ljf-dismiss-btn-text);border-color:var(--ljf-dismiss-btn-border); }
+#ljf-panel .ljf-rules-list { flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px 14px; }
+#ljf-panel .ljf-add-form {
+  padding:12px 14px;flex-shrink:0;
+  background:var(--ljf-form-bg);border-top:1px solid var(--ljf-border2); }
+#ljf-panel .ljf-form-label {
+  font-size:10px;margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--ljf-label-text); }
+#ljf-panel .ljf-form-control {
+  width:100%;box-sizing:border-box;border-radius:4px;
+  padding:5px 8px;margin-bottom:6px;font-size:12px;border:1px solid;
+  background:var(--ljf-input-bg);color:var(--ljf-input-text);border-color:var(--ljf-input-border); }
+#ljf-panel .ljf-form-control.ljf-mb8 { margin-bottom:8px; }
+#ljf-panel .ljf-add-btn {
+  width:100%;border-radius:4px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid;
+  background:var(--ljf-add-bg);color:var(--ljf-add-btn-text);border-color:var(--ljf-dismiss-btn-border); }
+#ljf-panel .ljf-quick-bar {
+  padding:10px 14px;border-bottom:1px solid var(--ljf-border2);flex-shrink:0; }
+#ljf-panel .ljf-quick-row { display:flex;gap:6px;align-items:center; }
+#ljf-panel .ljf-quick-input {
+  flex:1;box-sizing:border-box;border-radius:4px;padding:5px 8px;font-size:12px;border:1px solid;
+  background:var(--ljf-input-bg);color:var(--ljf-input-text);border-color:var(--ljf-input-border); }
+#ljf-panel .ljf-quick-btn {
+  padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;border-radius:4px;border:1px solid;
+  background:var(--ljf-dismiss-bg);color:var(--ljf-dismiss-btn-text);border-color:var(--ljf-dismiss-btn-border); }
+#ljf-panel .ljf-block { padding:8px 10px;margin-bottom:4px;border-radius:5px;border:1px solid; }
+#ljf-panel .ljf-block.ljf-dim  { background:var(--ljf-dim-row-bg); border-color:var(--ljf-dim-row-border); }
+#ljf-panel .ljf-block.ljf-hi   { background:var(--ljf-hi-row-bg);  border-color:var(--ljf-hi-row-border);  }
+#ljf-panel .ljf-block.ljf-log  { background:var(--ljf-log-row-bg); border-color:var(--ljf-log-row-border); }
+#ljf-panel .ljf-block.ljf-salary-off {
+  background:var(--ljf-salary-off-bg);border-color:var(--ljf-salary-off-border);cursor:pointer; }
+#ljf-panel .ljf-block-row { display:flex;align-items:center;justify-content:space-between;gap:6px; }
+#ljf-panel .ljf-block-left { flex:1;min-width:0; }
+#ljf-panel .ljf-block-title { font-size:12px;font-weight:600;color:var(--ljf-rule-label); }
+#ljf-panel .ljf-block-title.ljf-mb5 { margin-bottom:5px; }
+#ljf-panel .ljf-block-title.ljf-salary-on  { color:var(--ljf-salary-on-title);  }
+#ljf-panel .ljf-block-title.ljf-salary-off { color:var(--ljf-salary-off-title); }
+#ljf-panel .ljf-block-val { font-size:11px;margin-top:2px; }
+#ljf-panel .ljf-block-val.ljf-salary-on  { color:var(--ljf-salary-on-val);  }
+#ljf-panel .ljf-block-val.ljf-salary-off { color:var(--ljf-salary-off-val); }
+#ljf-panel .ljf-rule-row {
+  display:flex;align-items:center;gap:7px;
+  padding:7px 8px;margin-bottom:3px;border-radius:4px;border:1px solid; }
+#ljf-panel .ljf-rule-row.ljf-dim { background:var(--ljf-dim-row-bg);border-color:var(--ljf-dim-row-border); }
+#ljf-panel .ljf-rule-row.ljf-hi  { background:var(--ljf-hi-row-bg); border-color:var(--ljf-hi-row-border);  }
+#ljf-panel .ljf-row-label { flex:1;min-width:0;cursor:pointer; }
+#ljf-panel .ljf-row-value {
+  font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ljf-rule-label); }
+#ljf-panel .ljf-row-type { font-size:10px;margin-top:1px;color:var(--ljf-rule-type); }
+#ljf-panel .ljf-section-hdr {
+  display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.7px;padding:6px 0 5px;
+  cursor:pointer;user-select:none;color:var(--ljf-panel-text); }
+#ljf-panel .ljf-group-hdr {
+  display:flex;align-items:center;gap:5px;font-size:10px;
+  text-transform:uppercase;letter-spacing:.6px;padding:10px 0 4px;
+  cursor:pointer;user-select:none;color:var(--ljf-section-title); }
+#ljf-panel .ljf-hdr-count { color:var(--ljf-count-text); }
+#ljf-panel .ljf-hdr-arrow {
+  font-size:22px;margin-left:4px;line-height:0;position:relative;top:-2px;color:var(--ljf-arrow-text); }
+#ljf-panel .ljf-divider { border-top:1px solid var(--ljf-border1);margin:10px 0 2px; }
+#ljf-panel .ljf-btn-dismiss {
+  flex-shrink:0;border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;border:1px solid;
+  background:var(--ljf-green-bg);color:var(--ljf-green-text);border-color:var(--ljf-green-border); }
+#ljf-panel .ljf-btn-toggle {
+  flex-shrink:0;border-radius:3px;width:28px;height:22px;
+  padding:0;cursor:pointer;font-size:13px;font-weight:900;line-height:1;text-align:center;border:1px solid; }
+#ljf-panel .ljf-btn-toggle.ljf-on  {
+  background:var(--ljf-green-bg);color:var(--ljf-green-text);border-color:var(--ljf-green-border); }
+#ljf-panel .ljf-btn-toggle.ljf-off {
+  background:var(--ljf-red-bg);color:var(--ljf-red-text);border-color:var(--ljf-red-border); }
+#ljf-panel .ljf-btn-del {
+  flex-shrink:0;border-radius:3px;width:28px;height:22px;
+  padding:0;cursor:pointer;font-size:13px;font-weight:900;line-height:1;text-align:center;border:1px solid;
+  background:var(--ljf-red-bg);color:var(--ljf-red-text);border-color:var(--ljf-red-border); }
+#ljf-panel .ljf-jobs-scroll { overflow-y:auto;flex:1;min-height:0;scrollbar-gutter:stable; }
+#ljf-panel .ljf-jobs-table {
+  width:615px;margin-right:15px;border-collapse:collapse;table-layout:fixed;
+  font-size:11px;color:var(--ljf-panel-text);background:var(--ljf-row-bg); }
+#ljf-panel .ljf-jobs-table thead {
+  font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;white-space:nowrap; }
+#ljf-panel .ljf-jobs-table th {
+  padding:4px 6px;text-align:left;
+  background:var(--ljf-header-bg);color:var(--ljf-count-text);
+  border-bottom:2px solid var(--ljf-border1);
+  position:sticky;top:0;z-index:10;overflow:hidden;text-overflow:ellipsis; }
+#ljf-panel .ljf-jobs-table th.ljf-sort-active {
+  color:var(--ljf-label-text);border-bottom-color:var(--ljf-tab-accent); }
+#ljf-panel .ljf-jobs-table th.ljf-sortable { cursor:pointer;user-select:none; }
+#ljf-panel .ljf-jobs-table th.ljf-center,
+#ljf-panel .ljf-jobs-table td.ljf-center { text-align:center; }
+#ljf-panel .ljf-jobs-table tbody tr { border-bottom:1px solid var(--ljf-row-border); }
+#ljf-panel .ljf-jobs-table td { padding:1px 5px; }
+#ljf-panel .ljf-col-trunc { white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0; }
+#ljf-panel .ljf-col-muted { color:var(--ljf-count-text);white-space:nowrap; }
+#ljf-panel .ljf-col-icon { padding-bottom:2px;text-align:center;vertical-align:middle; }
+#ljf-panel .ljf-li-link { line-height:0;position:relative;bottom:1px; }
+#ljf-panel .ljf-li-icon { display:inline-block;vertical-align:middle; }
+#ljf-panel .ljf-status-sel {
+  width:100%;font-size:10px;padding:2px 4px;border-radius:3px;
+  border:none !important;outline:none !important;box-shadow:none !important;
+  -webkit-appearance:none;appearance:none;cursor:pointer;
+  position:relative;z-index:0; }
+#ljf-panel .ljf-log-del {
+  border-radius:3px;width:22px;height:18px;padding:0;
+  cursor:pointer;font-weight:900;line-height:1;text-align:center;border:1px solid;
+  background:var(--ljf-red-bg);color:var(--ljf-red-text);border-color:var(--ljf-red-border); }
+#ljf-panel .ljf-jobs-footer {
+  display:flex;justify-content:space-between;align-items:center;
+  flex-shrink:0;padding:5px 10px;font-size:10px;
+  background:var(--ljf-status-bg);border-top:1px solid var(--ljf-border1);color:var(--ljf-count-text); }
+#ljf-panel .ljf-footer-add {
+  background:var(--ljf-green-bg);border:1px solid var(--ljf-green-border);cursor:pointer;
+  font-size:13px;font-weight:700;line-height:1;
+  width:18px;height:18px;padding:0;border-radius:3px;
+  color:var(--ljf-green-text);display:inline-flex;align-items:center;justify-content:center; }
+#ljf-panel .ljf-footer-add:hover { filter:brightness(1.1); }
+#ljf-panel .ljf-add-job-row {
+  display:none;flex-shrink:0;align-items:center;gap:2px;
+  width:615px;margin-right:15px;padding:4px 0;
+  border-top:1px solid var(--ljf-border1);background:var(--ljf-form-bg); }
+#ljf-panel .ljf-add-job-row.ljf-open { display:flex; }
+#ljf-panel .ljf-add-job-input {
+  box-sizing:border-box;font-size:11px;padding:2px 4px;border-radius:3px;min-width:0;
+  border:1px solid var(--ljf-input-border);background:var(--ljf-input-bg);color:var(--ljf-input-text); }
+#ljf-panel .ljf-add-job-sel {
+  box-sizing:border-box;font-size:10px;padding:2px 4px;border-radius:3px;min-width:0;
+  border:1px solid var(--ljf-input-border) !important;outline:none !important;
+  background:var(--ljf-input-bg);color:var(--ljf-input-text);
+  -webkit-appearance:none;appearance:none;cursor:pointer; }
+#ljf-panel .ljf-add-job-submit {
+  flex-shrink:0;padding:2px 7px;border-radius:3px;cursor:pointer;
+  font-size:11px;font-weight:600;white-space:nowrap;border:1px solid;
+  background:var(--ljf-add-bg);color:var(--ljf-add-btn-text);border-color:var(--ljf-dismiss-btn-border); }
+#ljf-panel .ljf-sort-arrow { opacity:.7;font-weight:400; }
+#ljf-panel .ljf-jobs-empty { padding:24px;text-align:center;font-size:12px;color:var(--ljf-empty-text); }
+#ljf-panel #ljf-value-input::placeholder,
+#ljf-panel #ljf-label-input::placeholder,
+#ljf-panel #ljf-quick-company::placeholder { color:#999 !important; }
+#ljf-panel .ljf-footer-stats { display:flex;align-items:center;gap:8px; }
+#ljf-panel .ljf-stat-pill { padding:1px 6px;border-radius:10px;font-size:9px;background:var(--ljf-header-bg);border:1px solid var(--ljf-border1); }
+#ljf-panel #ljf-jcp { position:fixed;z-index:99998;display:none;min-width:180px;max-width:260px;border-radius:5px;padding:8px;background:var(--ljf-panel-bg);color:var(--ljf-panel-text);border:1px solid var(--ljf-border1);box-shadow:0 2px 8px rgba(0,0,0,.25);pointer-events:auto;font-size:11px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+#ljf-panel #ljf-jcp .ljf-jcp-company { font-weight:700;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+#ljf-panel #ljf-jcp .ljf-jcp-titles { margin:0 0 4px;padding:0 0 0 12px;list-style:disc; }
+#ljf-panel #ljf-jcp .ljf-jcp-title { margin:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px; }
+#ljf-panel #ljf-jcp .ljf-jcp-meta { color:var(--ljf-count-text);margin-bottom:5px; }
+#ljf-panel #ljf-jcp .ljf-jcp-hi-btn { width:100%;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:10px;border:1px solid var(--ljf-green-border);background:var(--ljf-green-bg);color:var(--ljf-green-text); }
+#ljf-panel #ljf-jcp .ljf-jcp-hi-btn:disabled { opacity:.5;cursor:default; }
+`;
+  }
+
+  function setPanelVars() {
+    const panel = document.getElementById('ljf-panel');
+    if (!panel) return;
+    const th = t();
+    const vars = {
+      '--ljf-panel-bg':           th.panelBg,
+      '--ljf-header-bg':          th.headerBg,
+      '--ljf-form-bg':            th.formBg,
+      '--ljf-status-bg':          th.statusBg,
+      '--ljf-row-bg':             darkMode ? '#1c1c1c' : '#fff',
+      '--ljf-dim-row-bg':         th.dimRowBg,
+      '--ljf-hi-row-bg':          th.hiRowBg,
+      '--ljf-log-row-bg':         th.logRowBg,
+      '--ljf-salary-off-bg':      th.salaryOffBg,
+      '--ljf-input-bg':           th.inputBg,
+      '--ljf-dismiss-bg':         th.dismissBg,
+      '--ljf-add-bg':             th.addBg,
+      '--ljf-green-bg':           th.greenBg,
+      '--ljf-red-bg':             th.redBg,
+      '--ljf-panel-text':         th.panelText,
+      '--ljf-label-text':         th.labelText,
+      '--ljf-rule-label':         th.ruleLabel,
+      '--ljf-rule-type':          th.ruleType,
+      '--ljf-section-title':      th.sectionTitle,
+      '--ljf-count-text':         th.countText,
+      '--ljf-empty-text':         th.emptyText,
+      '--ljf-input-text':         th.inputText,
+      '--ljf-gear-text':          th.gearText,
+      '--ljf-dismiss-btn-text':   th.dismissBtnText,
+      '--ljf-add-btn-text':       th.addBtnText,
+      '--ljf-green-text':         th.greenText,
+      '--ljf-red-text':           th.redText,
+      '--ljf-status-text':        th.statusText,
+      '--ljf-arrow-text':         th.arrowText,
+      '--ljf-salary-on-title':    th.salaryOnTitle,
+      '--ljf-salary-on-val':      th.salaryOnVal,
+      '--ljf-salary-off-title':   th.salaryOffTitle,
+      '--ljf-salary-off-val':     th.salaryOffVal,
+      '--ljf-border1':            th.border1,
+      '--ljf-border2':            th.border2,
+      '--ljf-border3':            th.border3,
+      '--ljf-row-border':         th.rowBorder,
+      '--ljf-dim-row-border':     th.dimRowBorder,
+      '--ljf-hi-row-border':      th.hiRowBorder,
+      '--ljf-log-row-border':     th.logRowBorder,
+      '--ljf-salary-off-border':  th.salaryOffBorder,
+      '--ljf-input-border':       th.inputBorder,
+      '--ljf-tab-accent':         th.tabAccent,
+      '--ljf-dismiss-btn-border': th.dismissBtnBorder,
+      '--ljf-green-border':       th.greenBorder,
+      '--ljf-red-border':         th.redBorder,
+    };
+    for (const [k, v] of Object.entries(vars)) panel.style.setProperty(k, v);
+  }
+
+  // ─── Jobs pane helpers ────────────────────────────────────────────────────────
+
+  function daysAgo(dateStr) {
+    if (!dateStr) return '—';
+    const days = Math.floor((Date.now() - new Date(dateStr + 'T00:00:00').getTime()) / 86400000);
+    if (days === 0) return 'today';
+    if (days === 1) return '1d';
+    return days + 'd';
+  }
+
+  function statusStyle(status) {
+    const s = status || 'applied';
+    const map = darkMode ? {
+      applied:      { bg:'#2a2a2a', text:'#aaa',    bdr:'#444'    },
+      interviewing: { bg:'#332800', text:'#d4a800', bdr:'#554400' },
+      offer:        { bg:'#0a2a0a', text:'#5cb85c', bdr:'#1a5a1a' },
+      rejected:     { bg:'#2a0a0a', text:'#c05555', bdr:'#5a1a1a' },
+      withdrawn:    { bg:'#1a1a1a', text:'#666',    bdr:'#333'    },
+    } : {
+      applied:      { bg:'#f0f0f0', text:'#555',    bdr:'#ccc'    },
+      interviewing: { bg:'#fffbe6', text:'#7a5c00', bdr:'#c8a200' },
+      offer:        { bg:'#edfaed', text:'#1a6b1a', bdr:'#5cb85c' },
+      rejected:     { bg:'#faeded', text:'#8b0000', bdr:'#c05555' },
+      withdrawn:    { bg:'#f5f5f5', text:'#888',    bdr:'#ccc'    },
+    };
+    return map[s] || map.applied;
+  }
+
+  function computeStats(log) {
+    const total = log.length;
+    if (total === 0) return '';
+    const counts = { applied: 0, interviewing: 0, offer: 0, rejected: 0, withdrawn: 0 };
+    for (const e of log) counts[e.status || 'applied']++;
+    const responded = counts.interviewing + counts.offer + counts.rejected;
+    const pills = [];
+    if (responded > 0) pills.push(Math.round(responded / total * 100) + '% response');
+    if (counts.offer > 0) pills.push(Math.round(counts.offer / total * 100) + '% offer');
+    if (counts.rejected > 0) pills.push(Math.round(counts.rejected / total * 100) + '% rejected');
+    return pills.map(p => `<span class="ljf-stat-pill">${p}</span>`).join('');
+  }
+
+  function renderJobsPane() {
+    const pane = document.getElementById('ljf-pane-jobs');
+    if (!pane) return;
+
+    const COLS     = ['company','title','date','days','status','link','del'];
+    const LABELS   = { company:'Company', title:'Title', date:'Applied', days:'Age', status:'Status', link:'', del:'' };
+    const WIDTHS   = { company:'26%', title:'33%', date:'12%', days:'7%', status:'12%', link:'5%', del:'5%' };
+    const SORTABLE = new Set(['company','title','date','status']);
+
+    const indexed = appliedLog.map((e, i) => ({ e, i }));
+    indexed.sort(({ e: a, i: ai }, { e: b, i: bi }) => {
+      let av, bv;
+      const col = jobSort.col;
+      if (col === 'date')         { av = a.date    || ''; bv = b.date    || ''; }
+      else if (col === 'company') { av = (a.company || '').toLowerCase(); bv = (b.company || '').toLowerCase(); }
+      else if (col === 'title')   { av = (a.title   || '').toLowerCase(); bv = (b.title   || '').toLowerCase(); }
+      else if (col === 'status')  { av = a.status  || 'applied';          bv = b.status  || 'applied'; }
+      else { av = ''; bv = ''; }
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      if (cmp !== 0) return jobSort.dir === 'asc' ? cmp : -cmp;
+      // tiebreak: preserve original index order (asc = earliest added first, desc = latest added first)
+      return jobSort.dir === 'asc' ? ai - bi : bi - ai;
+    });
+    const headerCells = COLS.map(col => {
+      const active = jobSort.col === col;
+      const sortable = SORTABLE.has(col);
+      const arrow = active ? (jobSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+      const cls = [
+        active   ? 'ljf-sort-active' : '',
+        sortable ? 'ljf-sortable'    : '',
+        col === 'days' ? 'ljf-center' : '',
+      ].filter(Boolean).join(' ');
+      return `<th data-sort="${col}" class="${cls}" style="width:${WIDTHS[col]};">
+        ${LABELS[col]}${arrow ? `<span class="ljf-sort-arrow">${arrow}</span>` : ''}
+      </th>`;
+    }).join('');
+
+    const STATUS_OPTIONS = ['applied','interviewing','offer','rejected','withdrawn'];
+    const _now = new Date();
+    const today = [_now.getFullYear(), String(_now.getMonth() + 1).padStart(2, '0'), String(_now.getDate()).padStart(2, '0')].join('-');
+    const companies = [...new Set(appliedLog.map(e => e.company).filter(Boolean))].sort();
+    const titles    = [...new Set(appliedLog.map(e => e.title).filter(Boolean))].sort();
+    const coOptions = companies.map(c => `<option value="${escHtml(c)}">`).join('');
+    const tiOptions = titles.map(ti => `<option value="${escHtml(ti)}">`).join('');
+
+    const rows = indexed.length === 0
+      ? `<tr><td colspan="7" class="ljf-jobs-empty">No applications logged yet.</td></tr>`
+      : indexed.map(({ e: entry, i: logIdx }) => {
+          const status  = entry.status || 'applied';
+          const sc      = statusStyle(status);
+          const company = entry.company || '—';
+          const title   = entry.title   || '—';
+          const url     = entry.url     || '';
+          const dateStr = entry.date    || '';
+          const opts    = STATUS_OPTIONS.map(s =>
+            `<option value="${s}"${s === status ? ' selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
+          ).join('');
+          const liIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" focusable="false" class="ljf-li-icon">
+            <path d="M15 2v12a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1h12a1 1 0 011 1zM5 6H3v7h2zm.25-2A1.25 1.25 0 104 5.25 1.25 1.25 0 005.25 4zM13 9.29c0-2.2-.73-3.49-2.86-3.49A2.71 2.71 0 007.89 7V6H6v7h2V9.73a1.73 1.73 0 011.52-1.92h.14C10.82 7.8 11 8.94 11 9.73V13h2z" fill="#0a66c2"></path>
+          </svg>`;
+          return `<tr data-log-idx="${logIdx}">
+            <td class="ljf-col-trunc ljf-co-cell" data-company="${escHtml(company)}" title="${escHtml(company)}">${escHtml(company)}</td>
+            <td class="ljf-col-trunc" title="${escHtml(title)}">${escHtml(title)}</td>
+            <td class="ljf-col-muted">${escHtml(dateStr) || '—'}</td>
+            <td class="ljf-col-muted ljf-center">${daysAgo(dateStr)}</td>
+            <td style="padding:1px 3px;">
+              <select class="ljf-status-sel" data-log-idx="${logIdx}" style="background:${sc.bg};color:${sc.text};">
+                ${opts}
+              </select>
+            </td>
+            <td class="ljf-col-icon">
+              ${url ? `<a href="${escHtml(url)}" target="_blank" rel="noopener" class="ljf-li-link" title="Open listing">${liIcon}</a>` : ''}
+            </td>
+            <td class="ljf-col-icon">
+              <button class="ljf-log-del" data-log-idx="${logIdx}" title="Delete entry">✕</button>
+            </td>
+          </tr>`;
+        }).join('');
+
+    pane.innerHTML = `
+<datalist id="ljf-co-list">${coOptions}</datalist>
+<datalist id="ljf-ti-list">${tiOptions}</datalist>
+<div class="ljf-jobs-scroll">
+  <table class="ljf-jobs-table">
+    <thead><tr>${headerCells}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</div>
+<div id="ljf-add-job-row" class="ljf-add-job-row">
+  <input id="ljf-aj-company" class="ljf-add-job-input" type="text" placeholder="Company"  list="ljf-co-list" autocomplete="off" style="flex:0 0 26%;">
+  <input id="ljf-aj-title"   class="ljf-add-job-input" type="text" placeholder="Title"    list="ljf-ti-list" autocomplete="off" style="flex:0 0 33%;">
+  <input id="ljf-aj-date"    class="ljf-add-job-input" type="date" value="${today}" style="flex:0 0 12%;">
+  <div style="flex:0 0 7%;"></div>
+  <select id="ljf-aj-status" class="ljf-add-job-sel" style="flex:0 0 12%;">
+    ${STATUS_OPTIONS.map(s => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join('')}
+  </select>
+  <input id="ljf-aj-url" class="ljf-add-job-input" type="url" placeholder="Job URL" autocomplete="off" style="flex:1;min-width:0;">
+  <button id="ljf-aj-add" class="ljf-add-job-submit">Add</button>
+</div>
+<div id="ljf-jobs-footer" class="ljf-jobs-footer">
+  <div class="ljf-footer-stats">
+    <span>${indexed.length} application${indexed.length === 1 ? '' : 's'}</span>
+    ${computeStats(appliedLog)}
+  </div>
+  <button id="ljf-footer-add" class="ljf-footer-add" title="Add job manually">+</button>
+</div>`;
+
+    // Sort header click handlers
+    pane.querySelectorAll('th[data-sort]').forEach(thEl => {
+      const col = thEl.dataset.sort;
+      if (!SORTABLE.has(col)) return;
+      thEl.addEventListener('click', () => {
+        if (jobSort.col === col) {
+          jobSort.dir = jobSort.dir === 'desc' ? 'asc' : 'desc';
+        } else {
+          jobSort.col = col;
+          jobSort.dir = col === 'date' ? 'desc' : 'asc';
+        }
+        renderJobsPane();
+      });
+    });
+
+    // Status dropdown change handlers
+    pane.querySelectorAll('.ljf-status-sel').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const idx = +sel.dataset.logIdx;
+        if (!appliedLog[idx]) return;
+        appliedLog[idx].status    = sel.value;
+        appliedLog[idx].statusDate = new Date().toISOString().slice(0, 10);
+        saveAppliedLog();
+        const sc = statusStyle(sel.value);
+        sel.style.background  = sc.bg;
+        sel.style.color       = sc.text;
+        sel.style.borderColor = sc.bdr;
+      });
+    });
+
+    // Delete button handlers
+    pane.querySelectorAll('.ljf-log-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = +btn.dataset.logIdx;
+        const entry = appliedLog[idx];
+        if (!entry) return;
+        const label = [entry.company, entry.title].filter(Boolean).join(' — ') || 'this entry';
+        if (!confirm('Delete "' + label + '" from the job log?')) return;
+        appliedLog.splice(idx, 1);
+        saveAppliedLog();
+        clearHighlights();
+        applyAllRules();
+        renderJobsPane();
+      });
+    });
+
+    // Add job form toggle
+    pane.querySelector('#ljf-footer-add')?.addEventListener('click', () => {
+      const row = pane.querySelector('#ljf-add-job-row');
+      const isOpen = row.classList.toggle('ljf-open');
+      if (isOpen) pane.querySelector('#ljf-aj-company')?.focus();
+    });
+
+    // Add job submit
+    function submitAddJob() {
+      const company = pane.querySelector('#ljf-aj-company')?.value.trim();
+      const title   = pane.querySelector('#ljf-aj-title')?.value.trim();
+      const date    = pane.querySelector('#ljf-aj-date')?.value;
+      const status  = pane.querySelector('#ljf-aj-status')?.value || 'applied';
+      const url     = pane.querySelector('#ljf-aj-url')?.value.trim();
+      if (!company || !title || !date || !url) return;
+      appliedLog.push({ company, title, date, url, status, statusDate: today });
+      saveAppliedLog();
+      clearHighlights();
+      applyAllRules();
+      renderJobsPane();
+      // Re-open the form and focus company for quick multi-entry
+      const row = pane.querySelector('#ljf-add-job-row');
+      if (row) {
+        row.classList.add('ljf-open');
+        pane.querySelector('#ljf-aj-company')?.focus();
+      }
+    }
+
+    pane.querySelector('#ljf-aj-add')?.addEventListener('click', submitAddJob);
+    pane.querySelector('#ljf-aj-url')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') submitAddJob();
+    });
+  }
 
   // ─── Storage helpers ─────────────────────────────────────────────────────────
 
@@ -247,7 +734,7 @@
     return amount;
   }
 
-  // Returns all salary values (annualised) found across all salary elements on a card.
+  // Returns all salary values (annualized) found across all salary elements on a card.
   function parseSalaries(card) {
     const items = card.querySelectorAll(SALARY_SEL);
     const all = [];
@@ -263,6 +750,28 @@
       }
     }
     return all;
+  }
+
+  // Applies the same salary regex to a raw text string (for view-page salary extraction).
+  function parseSalaryText(text) {
+    const all = [];
+    const regex = /\$([\d,]+(?:\.\d+)?)([Kk]?)(?:\s*(?:[\/\\]\s*)?(yr|year|mo|month|hr|hour))?/g;
+    let m;
+    while ((m = regex.exec(text))) {
+      let amount = parseFloat(m[1].replace(/,/g, ''));
+      if (isNaN(amount)) continue;
+      if (m[2] && /[Kk]/.test(m[2])) amount *= 1000;
+      all.push(toAnnual(amount, normalizeUnit(m[3])));
+    }
+    return all;
+  }
+
+  // For job view pages: checks hero textContent first (salary pill), then the job description body.
+  function parseViewPageSalaries(hero) {
+    const heroSalaries = parseSalaryText(hero ? hero.textContent : '');
+    if (heroSalaries.length > 0) return heroSalaries;
+    const aboutEl = document.querySelector('[componentkey^="JobDetails_AboutTheJob_"]');
+    return aboutEl ? parseSalaryText(aboutEl.textContent) : [];
   }
 
   function matchSalary(card, rule) {
@@ -318,7 +827,7 @@
     return document.querySelectorAll(CARD_SEL);
   }
 
-  // Count how many visible cards a single rule matches (no visual side-effects).
+  // Count how many visible cards a single rule matches (no visual side effects).
   function countMatches(rule) {
     if (!rule.enabled) return 0;
     const typeDef = RULE_TYPES[rule.type];
@@ -406,6 +915,8 @@
     let total = 0;
     for (const card of getCards()) total += applyCardRules(card);
     applyJobLog();
+    applyViewHeroRules();
+    applySavedJobRules();
     updateTabCount();
     return total;
   }
@@ -423,7 +934,7 @@
     }
   }
 
-  function daysAgo(dateStr) {
+  function daysSince(dateStr) {
     if (!dateStr) return null;
     const d = new Date(dateStr);
     if (isNaN(d)) return null;
@@ -433,8 +944,8 @@
 
   function actJobLogCompanyLabel(card, date) {
     if (isDismissed(card)) return;
-    if (card.dataset.ljfJobLogLabel) return; // already labelled
-    const days = daysAgo(date);
+    if (card.dataset.ljfJobLogLabel) return; // already labeled
+    const days = daysSince(date);
     const reapplyOk = days !== null && days >= 14;
     const isRecent  = days !== null && days < 14;
 
@@ -485,7 +996,7 @@
 
   function actJobLog(card, entry) {
     if (isDismissed(card)) { markDismissed(card); return; }
-    if (card.dataset.ljfJobLog) return; // already labelled
+    if (card.dataset.ljfJobLog) return; // already labeled
     const alreadyDismissRule = !!card.dataset.ljfHighlighted;
     const dateStr   = entry.date || '';
     const badgeText = 'Applied' + (dateStr ? ' on ' + dateStr : '');
@@ -549,6 +1060,290 @@
     return dismissed;
   }
 
+  // ─── View page hero highlighting ─────────────────────────────────────────────
+
+  function getViewHero() {
+    const banner = document.querySelector('[componentkey^="JobDetails_ManageJobBanner_"]');
+    return banner ? banner.nextElementSibling : null;
+  }
+
+  function addViewBadge(hero, text, bg) {
+    const n = hero.querySelectorAll('.ljf-badge').length;
+    const badge = document.createElement('span');
+    badge.className = 'ljf-badge';
+    badge.textContent = text;
+    badge.style.cssText = [
+      'position:absolute', `bottom:${6 + n * 20}px`, 'right:20px',
+      `background:${bg}`, 'color:#fff',
+      'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
+      'pointer-events:none', 'z-index:9999',
+      'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
+    ].join(';');
+    hero.appendChild(badge);
+  }
+
+  function matchViewRule(rule, company, title, salaries) {
+    switch (rule.type) {
+      case 'companydismiss': case 'companyhi':
+        return company.toLowerCase().includes(rule.value.toLowerCase());
+      case 'titledismiss': case 'titlehi': {
+        const normT = normalizeSenior(title);
+        const normV = normalizeSenior(rule.value);
+        return normT.toLowerCase().includes(normV.toLowerCase());
+      }
+      case 'salarybelow': case 'topsalarybelow': case 'salaryabove': case 'topsalaryabove': {
+        const threshold = parseFloat(rule.value) * 1000;
+        if (isNaN(threshold)) return false;
+        if (salaries.length === 0) return false;
+        if (rule.type === 'salarybelow')    return Math.min(...salaries) < threshold;
+        if (rule.type === 'topsalarybelow') return Math.max(...salaries) < threshold;
+        if (rule.type === 'salaryabove')    return Math.min(...salaries) >= threshold;
+        if (rule.type === 'topsalaryabove') return Math.max(...salaries) >= threshold;
+        return false;
+      }
+      default: return false;
+    }
+  }
+
+  function applyViewHeroRules() {
+    if (!/\/jobs\/view\/\d+/.test(window.location.pathname)) return;
+    const hero = getViewHero();
+    if (!hero) return;
+
+    hero.querySelectorAll('.ljf-badge').forEach(b => b.remove());
+    hero.style.removeProperty('background-color');
+    hero.style.removeProperty('border-left');
+    hero.style.removeProperty('box-sizing');
+    delete hero.dataset.ljfHero;
+
+    const parts    = document.title.split(' | ');
+    const title    = (parts[0] || '').trim();
+    const company  = (parts[1] || '').trim();
+    if (!title && !company) return;
+
+    const salaries = parseViewPageSalaries(hero);
+
+    const dismissMatches   = [];
+    const highlightMatches = [];
+    for (const rule of rules) {
+      if (!rule.enabled) continue;
+      const typeDef = RULE_TYPES[rule.type];
+      if (!typeDef) continue;
+      if (matchViewRule(rule, company, title, salaries)) {
+        if (typeDef.highlight) highlightMatches.push(rule);
+        else                   dismissMatches.push(rule);
+      }
+    }
+
+    // Salary-pair deduplication (mirrors applyCardRules)
+    let shownHighlight = highlightMatches;
+    let shownDismiss   = dismissMatches;
+    if (highlightMatches.some(r => r.type === 'salaryabove') && highlightMatches.some(r => r.type === 'topsalaryabove'))
+      shownHighlight = highlightMatches.filter(r => r.type !== 'topsalaryabove');
+    if (dismissMatches.some(r => r.type === 'salarybelow') && dismissMatches.some(r => r.type === 'topsalarybelow'))
+      shownDismiss = dismissMatches.filter(r => r.type !== 'salarybelow');
+
+    // Job log — exact match
+    const logEntry = jobLogEnabled ? (appliedLog.find(e =>
+      logCompanyMatches(company.toLowerCase(), e.company) &&
+      e.title && title.toLowerCase().includes(e.title.toLowerCase())
+    ) || null) : null;
+
+    // Job log — company-only match
+    const logCompanyDate = (!logEntry && jobLogEnabled) ? (() => {
+      const entries = appliedLog.filter(e => logCompanyMatches(company.toLowerCase(), e.company));
+      if (!entries.length) return null;
+      const dates = entries.map(e => e.date || '').filter(Boolean).sort();
+      return dates.length ? dates[dates.length - 1] : '';
+    })() : null;
+
+    if (!shownDismiss.length && !shownHighlight.length && !logEntry && logCompanyDate === null) return;
+
+    hero.style.position = 'relative';
+    let dismissed = false;
+
+    // Tint: dismiss > highlight; log exact and recent-company handled below
+    if (shownDismiss.length) {
+      hero.style.setProperty('background-color', CC.dismissBg, 'important');
+      hero.style.setProperty('border-left', '3px solid ' + CC.dismissBorder, 'important');
+      hero.style.setProperty('box-sizing', 'border-box', 'important');
+      hero.dataset.ljfHero = 'dismiss';
+      dismissed = true;
+    } else if (shownHighlight.length) {
+      hero.style.setProperty('background-color', CC.highlightBg, 'important');
+      hero.style.setProperty('border-left', '3px solid ' + CC.highlightBorder, 'important');
+      hero.style.setProperty('box-sizing', 'border-box', 'important');
+      hero.dataset.ljfHero = 'highlight';
+    }
+
+    // Rule badges
+    for (const rule of shownDismiss)   addViewBadge(hero, '\u26F3 ' + rule.label, CC.dismissBadge);
+    for (const rule of shownHighlight) addViewBadge(hero, '\u2605 ' + rule.label, CC.highlightBadge);
+
+    // Job log — exact match badge + tint
+    if (logEntry) {
+      addViewBadge(hero, 'Applied' + (logEntry.date ? ' on ' + logEntry.date : ''), CC.dismissBadge);
+      if (!dismissed) {
+        hero.style.setProperty('background-color', CC.dismissBg, 'important');
+        hero.style.setProperty('border-left', '3px solid ' + CC.dismissBorder, 'important');
+        hero.style.setProperty('box-sizing', 'border-box', 'important');
+        hero.dataset.ljfHero = 'dismiss';
+      }
+    } else if (logCompanyDate !== null) {
+      // Company-only badge (mirrors actJobLogCompanyLabel)
+      const days = daysSince(logCompanyDate);
+      const reapplyOk = days !== null && days >= 14;
+      const isRecent  = days !== null && days < 14;
+      const badge = document.createElement('span');
+      badge.className = 'ljf-badge';
+      const bCount = hero.querySelectorAll('.ljf-badge').length;
+      badge.style.cssText = [
+        'position:absolute', `bottom:${6 + bCount * 20}px`, 'right:20px',
+        `background:${isRecent ? CC.recentBadge : CC.staleBadge}`, 'color:#fff',
+        'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
+        'pointer-events:none', 'z-index:9999',
+        'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
+        'display:inline-flex', 'align-items:center', 'gap:4px',
+      ].join(';');
+      badge.appendChild(document.createTextNode(
+        'Last applied' + (logCompanyDate ? ' ' + logCompanyDate : '') +
+        (days !== null ? ' | ' + String(days) + ' days ago' : '')
+      ));
+      if (days !== null) {
+        const icon = document.createElement('span');
+        icon.textContent = reapplyOk ? '\u2714' : '\u2716';
+        icon.style.cssText = 'font-size:11px;font-weight:900;line-height:1;';
+        icon.style.setProperty('color', reapplyOk ? '#4ade80' : '#f87171', 'important');
+        badge.appendChild(icon);
+      }
+      hero.appendChild(badge);
+      // Yellow tint for recent company match overrides green, not red
+      if (isRecent && !dismissed) {
+        hero.style.setProperty('background-color', CC.recentBg, 'important');
+        hero.style.setProperty('border-left', '3px solid ' + CC.recentBorder, 'important');
+        hero.style.setProperty('box-sizing', 'border-box', 'important');
+      }
+    }
+  }
+
+  // ─── Saved-jobs page highlighting ────────────────────────────────────────────
+
+  function applySavedJobRules() {
+    if (!/\/my-items\/saved-jobs/.test(window.location.pathname)) return;
+
+    for (const card of document.querySelectorAll(SAVED_CARD_SEL)) {
+      if (card.dataset.ljfSavedApplied) continue;
+
+      const titleEl   = card.querySelector(SAVED_TITLE_SEL);
+      const companyEl = card.querySelector(SAVED_COMPANY_SEL);
+      const title     = titleEl   ? titleEl.textContent.trim()   : '';
+      const company   = companyEl ? companyEl.textContent.trim() : '';
+      if (!title && !company) continue;
+
+      const salaries = parseSalaries(card);
+
+      const dismissMatches   = [];
+      const highlightMatches = [];
+      for (const rule of rules) {
+        if (!rule.enabled) continue;
+        const typeDef = RULE_TYPES[rule.type];
+        if (!typeDef) continue;
+        if (matchViewRule(rule, company, title, salaries)) {
+          if (typeDef.highlight) highlightMatches.push(rule);
+          else                   dismissMatches.push(rule);
+        }
+      }
+
+      // Salary-pair deduplication (mirrors applyCardRules)
+      let shownHighlight = highlightMatches;
+      let shownDismiss   = dismissMatches;
+      if (highlightMatches.some(r => r.type === 'salaryabove') && highlightMatches.some(r => r.type === 'topsalaryabove'))
+        shownHighlight = highlightMatches.filter(r => r.type !== 'topsalaryabove');
+      if (dismissMatches.some(r => r.type === 'salarybelow') && dismissMatches.some(r => r.type === 'topsalarybelow'))
+        shownDismiss = dismissMatches.filter(r => r.type !== 'salarybelow');
+
+      // Job log — exact match
+      const logEntry = jobLogEnabled ? (appliedLog.find(e =>
+        logCompanyMatches(company.toLowerCase(), e.company) &&
+        e.title && title.toLowerCase().includes(e.title.toLowerCase())
+      ) || null) : null;
+
+      // Job log — company-only match
+      const logCompanyDate = (!logEntry && jobLogEnabled) ? (() => {
+        const entries = appliedLog.filter(e => logCompanyMatches(company.toLowerCase(), e.company));
+        if (!entries.length) return null;
+        const dates = entries.map(e => e.date || '').filter(Boolean).sort();
+        return dates.length ? dates[dates.length - 1] : '';
+      })() : null;
+
+      if (!shownDismiss.length && !shownHighlight.length && !logEntry && logCompanyDate === null) {
+        card.dataset.ljfSavedApplied = '1';
+        continue;
+      }
+
+      card.style.position = 'relative';
+      let wasDismissed = false;
+
+      if (shownDismiss.length) {
+        card.style.setProperty('background-color', CC.dismissBg, 'important');
+        card.style.setProperty('border-left', '3px solid ' + CC.dismissBorder, 'important');
+        card.style.setProperty('box-sizing', 'border-box', 'important');
+        wasDismissed = true;
+      } else if (shownHighlight.length) {
+        card.style.setProperty('background-color', CC.highlightBg, 'important');
+        card.style.setProperty('border-left', '3px solid ' + CC.highlightBorder, 'important');
+        card.style.setProperty('box-sizing', 'border-box', 'important');
+      }
+
+      for (const rule of shownDismiss)   addViewBadge(card, '\u26F3 ' + rule.label, CC.dismissBadge);
+      for (const rule of shownHighlight) addViewBadge(card, '\u2605 ' + rule.label, CC.highlightBadge);
+
+      if (logEntry) {
+        addViewBadge(card, 'Applied' + (logEntry.date ? ' on ' + logEntry.date : ''), CC.dismissBadge);
+        if (!wasDismissed) {
+          card.style.setProperty('background-color', CC.dismissBg, 'important');
+          card.style.setProperty('border-left', '3px solid ' + CC.dismissBorder, 'important');
+          card.style.setProperty('box-sizing', 'border-box', 'important');
+          wasDismissed = true;
+        }
+      } else if (logCompanyDate !== null) {
+        const days      = daysAgo(logCompanyDate);
+        const reapplyOk = days !== null && days >= 14;
+        const isRecent  = days !== null && days < 14;
+        const badge = document.createElement('span');
+        badge.className = 'ljf-badge';
+        const bCount = card.querySelectorAll('.ljf-badge').length;
+        badge.style.cssText = [
+          'position:absolute', `bottom:${6 + bCount * 20}px`, 'right:20px',
+          `background:${isRecent ? CC.recentBadge : CC.staleBadge}`, 'color:#fff',
+          'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
+          'pointer-events:none', 'z-index:9999',
+          'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
+          'display:inline-flex', 'align-items:center', 'gap:4px',
+        ].join(';');
+        badge.appendChild(document.createTextNode(
+          'Last applied' + (logCompanyDate ? ' ' + logCompanyDate : '') +
+          (days !== null ? ' | ' + String(days) + ' days ago' : '')
+        ));
+        if (days !== null) {
+          const icon = document.createElement('span');
+          icon.textContent = reapplyOk ? '\u2714' : '\u2716';
+          icon.style.cssText = 'font-size:11px;font-weight:900;line-height:1;';
+          icon.style.setProperty('color', reapplyOk ? '#4ade80' : '#f87171', 'important');
+          badge.appendChild(icon);
+        }
+        card.appendChild(badge);
+        if (isRecent && !wasDismissed) {
+          card.style.setProperty('background-color', CC.recentBg, 'important');
+          card.style.setProperty('border-left', '3px solid ' + CC.recentBorder, 'important');
+          card.style.setProperty('box-sizing', 'border-box', 'important');
+        }
+      }
+
+      card.dataset.ljfSavedApplied = '1';
+    }
+  }
+
   function updateTabCount() {
     const cards   = [...getCards()];
     const pill    = document.getElementById('ljf-tab-dismiss-pill');
@@ -600,6 +1395,21 @@
       card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
       delete card.dataset.ljfJobLog;
       delete card.dataset.ljfJobLogLabel;
+    }
+    const hero = getViewHero();
+    if (hero) {
+      hero.querySelectorAll('.ljf-badge').forEach(b => b.remove());
+      hero.style.removeProperty('background-color');
+      hero.style.removeProperty('border-left');
+      hero.style.removeProperty('box-sizing');
+      delete hero.dataset.ljfHero;
+    }
+    for (const card of document.querySelectorAll(SAVED_CARD_SEL)) {
+      card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
+      card.style.removeProperty('background-color');
+      card.style.removeProperty('border-left');
+      card.style.removeProperty('box-sizing');
+      delete card.dataset.ljfSavedApplied;
     }
     updateTabCount();
   }
@@ -682,7 +1492,7 @@
     panel.id = 'ljf-panel';
     panel.style.cssText = [
       'position:fixed', 'right:0', 'top:0', 'bottom:0',
-      'width:340px',
+      'width:' + panelWidthPx(),
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
       'font-size:13px',
       'box-shadow:-4px 0 24px rgba(0,0,0,.55)',
@@ -703,8 +1513,10 @@
     tab.addEventListener('click', () => {
       panelOpen = !panelOpen;
       panel.style.display = panelOpen ? 'flex' : 'none';
-      tab.style.right = panelOpen ? '340px' : '0';
-      if (panelOpen) renderRules();
+      panel.style.width = panelWidthPx();
+      tab.style.right = panelOpen ? panelWidthPx() : '0';
+      if (panelOpen && activePanel === 'rules') renderRules();
+      if (panelOpen && activePanel === 'jobs')  renderJobsPane();
     });
 
     document.getElementById('ljf-tab-dismiss').addEventListener('click', e => {
@@ -722,70 +1534,55 @@
   }
 
   function buildPanelHTML() {
-    const th = t();
     return `
-<div id="ljf-header" style="
-  background:${th.headerBg};padding:12px 14px;
-  display:flex;align-items:center;justify-content:space-between;
-  border-bottom:1px solid ${th.border1};flex-shrink:0;">
-  <strong style="font-size:14px;letter-spacing:.3px;">LinkedIn Job Filter</strong>
-  <button id="ljf-gear" title="Settings" style="
-    background:none;border:none;color:${th.gearText};cursor:pointer;
-    font-size:15px;padding:2px 4px;line-height:1;border-radius:3px;">&#9881;</button>
-</div>
-
-${dismissActionsEnabled ? `
-<div style="padding:10px 14px;border-bottom:1px solid ${th.border2};flex-shrink:0;">
-  <button id="ljf-run-all" style="
-    width:100%;background:${th.dismissBg};color:${th.dismissBtnText};border:1px solid ${th.dismissBtnBorder};border-radius:4px;
-    padding:8px;cursor:pointer;font-size:12px;font-weight:600;">
-    &#10005; Dismiss All
-  </button>
-</div>` : ''}
-
-<div id="ljf-rules-list" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px 14px;"></div>
-
-<div id="ljf-add-form" style="
-  border-top:1px solid ${th.border2};padding:12px 14px;flex-shrink:0;background:${th.formBg};">
-  <div id="ljf-add-form-title" style="font-size:10px;color:${th.labelText};margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Add Rule</div>
-  <select id="ljf-type-sel" style="
-    width:100%;background:${th.inputBg};color:${th.inputText};border:1px solid ${th.inputBorder};
-    border-radius:4px;padding:5px 8px;margin-bottom:6px;font-size:12px;">
-    ${DROPDOWN_TYPES.map(k => `<option value="${k}">${RULE_TYPES[k].label}</option>`).join('')}
-  </select>
-  <input id="ljf-value-input" type="text"
-    placeholder="Value  (e.g. Ethos, 100, Sales...)"
-    style="width:100%;box-sizing:border-box;background:${th.inputBg};color:${th.inputText};border:1px solid ${th.inputBorder};
-      border-radius:4px;padding:5px 8px;margin-bottom:6px;font-size:12px;"/>
-  <input id="ljf-label-input" type="text"
-    placeholder="Label  (optional)"
-    style="width:100%;box-sizing:border-box;background:${th.inputBg};color:${th.inputText};border:1px solid ${th.inputBorder};
-      border-radius:4px;padding:5px 8px;margin-bottom:8px;font-size:12px;"/>
-  <button id="ljf-add-btn" style="
-    width:100%;background:${th.addBg};color:${th.addBtnText};border:1px solid ${th.dismissBtnBorder};border-radius:4px;
-    padding:8px;cursor:pointer;font-size:12px;font-weight:600;">
-    + Add Rule
-  </button>
-</div>
-
-${dismissActionsEnabled ? `
-<div style="padding:10px 14px;border-bottom:1px solid ${th.border2};flex-shrink:0;">
-  <div style="font-size:10px;color:${th.labelText};margin-bottom:7px;text-transform:uppercase;letter-spacing:.6px;">Quick Dismiss</div>
-  <div style="display:flex;gap:6px;align-items:center;">
-    <input id="ljf-quick-company" type="text" placeholder="Company name"
-      style="flex:1;box-sizing:border-box;background:${th.inputBg};color:${th.inputText};border:1px solid ${th.inputBorder};
-        border-radius:4px;padding:5px 8px;font-size:12px;"/>
-    <button id="ljf-quick-dismiss" style="
-      background:${th.dismissBg};color:${th.dismissBtnText};border:1px solid ${th.dismissBtnBorder};border-radius:4px;
-      padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">
-      Dismiss
-    </button>
+<div id="ljf-header" class="ljf-header">
+  <strong>LinkedIn Job Filter</strong>
+  <div class="ljf-header-btns">
+    <button id="ljf-help" class="ljf-help" title="Help / About">?</button>
+    <button id="ljf-gear" class="ljf-gear" title="Settings">&#9881;</button>
   </div>
-</div>` : ''}
+</div>
 
-<div id="ljf-status" style="
-  background:${th.statusBg};padding:5px 14px;font-size:11px;color:${th.statusText};
-  border-top:1px solid ${th.border3};flex-shrink:0;">Ready</div>
+<div id="ljf-tab-bar" class="ljf-tab-bar">
+  ${['rules','jobs'].map(p => `
+  <button id="ljf-pane-btn-${p}" class="ljf-tab-btn${activePanel===p ? ' ljf-active' : ''}">
+    ${p.charAt(0).toUpperCase()+p.slice(1)}
+  </button>`).join('')}
+</div>
+
+<div id="ljf-pane-rules" class="ljf-pane${activePanel==='rules' ? ' ljf-active' : ''}">
+  ${dismissActionsEnabled ? `
+  <div class="ljf-action-bar">
+    <button id="ljf-run-all" class="ljf-action-btn">&#10005; Dismiss All</button>
+  </div>` : ''}
+
+  <div id="ljf-rules-list" class="ljf-rules-list"></div>
+
+  <div id="ljf-add-form" class="ljf-add-form">
+    <div id="ljf-add-form-title" class="ljf-form-label">Add Rule</div>
+    <select id="ljf-type-sel" class="ljf-form-control">
+      ${DROPDOWN_TYPES.map(k => `<option value="${k}">${RULE_TYPES[k].label}</option>`).join('')}
+    </select>
+    <input id="ljf-value-input" type="text" class="ljf-form-control"
+      placeholder="Value  (e.g. Ethos, 100, Sales...)"/>
+    <input id="ljf-label-input" type="text" class="ljf-form-control ljf-mb8"
+      placeholder="Label  (optional)"/>
+    <button id="ljf-add-btn" class="ljf-add-btn">+ Add Rule</button>
+  </div>
+
+  ${dismissActionsEnabled ? `
+  <div class="ljf-quick-bar">
+    <div class="ljf-form-label">Quick Dismiss</div>
+    <div class="ljf-quick-row">
+      <input id="ljf-quick-company" type="text" class="ljf-quick-input" placeholder="Company name"/>
+      <button id="ljf-quick-dismiss" class="ljf-quick-btn">Dismiss</button>
+    </div>
+  </div>` : ''}
+</div>
+
+<div id="ljf-pane-jobs" class="ljf-pane${activePanel==='jobs' ? ' ljf-active' : ''}"></div>
+
+<div id="ljf-status" class="ljf-status-bar">Ready</div>
 `;
   }
 
@@ -818,6 +1615,39 @@ ${dismissActionsEnabled ? `
       });
     });
 
+    // ── Header bar → collapse panel (same as clicking the tab) ───────────────
+    document.getElementById('ljf-header').addEventListener('click', () => {
+      const tab = document.getElementById('ljf-tab');
+      const panel = document.getElementById('ljf-panel');
+      panelOpen = false;
+      panel.style.display = 'none';
+      tab.style.right = '0';
+    });
+
+    // ── Tab bar → switch panes ────────────────────────────────────────────────
+    ['rules', 'jobs'].forEach(pane => {
+      document.getElementById('ljf-pane-btn-' + pane)?.addEventListener('click', () => {
+        activePanel = pane;
+        GM_setValue('ljf_activePanel', pane);
+        const panel = document.getElementById('ljf-panel');
+        const tab   = document.getElementById('ljf-tab');
+        panel.style.width = panelWidthPx();
+        if (panelOpen && tab) tab.style.right = panelWidthPx();
+        ['rules', 'jobs'].forEach(p => {
+          document.getElementById('ljf-pane-' + p)?.classList.toggle('ljf-active', p === pane);
+          document.getElementById('ljf-pane-btn-' + p)?.classList.toggle('ljf-active', p === pane);
+        });
+        if (pane === 'rules') renderRules();
+        if (pane === 'jobs')  renderJobsPane();
+      });
+    });
+
+    // ── Help button → onboarding modal ───────────────────────────────────────
+    document.getElementById('ljf-help').addEventListener('click', e => {
+      e.stopPropagation();
+      openOnboardingModal();
+    });
+
     // ── Gear button → settings modal ──────────────────────────────────────────
     document.getElementById('ljf-gear').addEventListener('click', e => {
       e.stopPropagation();
@@ -828,7 +1658,6 @@ ${dismissActionsEnabled ? `
       if (editingRuleId !== null) {
         const sel = document.getElementById('ljf-type-sel');
         if (sel.value !== editingOrigType) {
-          // Cancel edit; keep newly-selected type, clear filled-in values
           editingRuleId   = null;
           editingOrigType = null;
           document.getElementById('ljf-value-input').value = '';
@@ -841,16 +1670,75 @@ ${dismissActionsEnabled ? `
       updateLabelVisibility();
     });
 
-    // Apply placeholder styling for current theme
-    let styleEl = document.getElementById('ljf-placeholder-style');
-    if (!styleEl) {
-      styleEl = document.createElement('style');
-      styleEl.id = 'ljf-placeholder-style';
-      document.head.appendChild(styleEl);
+    // ── Jobs tab — company hover popover ─────────────────────────────────────
+    const oldJcp = document.getElementById('ljf-jcp');
+    if (oldJcp) oldJcp.remove();
+    const jcp = document.createElement('div');
+    jcp.id = 'ljf-jcp';
+    document.getElementById('ljf-panel').appendChild(jcp);
+
+    let jcpHide = null;
+
+    function showCompanyPopover(cell) {
+      clearTimeout(jcpHide);
+      const company = cell.dataset.company;
+      if (!company) return;
+      const entries = appliedLog.filter(e => e.company && e.company.toLowerCase() === company.toLowerCase());
+      if (!entries.length) return;
+
+      const titles   = [...new Set(entries.map(e => e.title).filter(Boolean))];
+      const lastDate = entries.map(e => e.date || '').filter(Boolean).sort().at(-1) || '';
+      const hasHiRule = rules.some(r => r.type === 'companyhi' && r.value.toLowerCase() === company.toLowerCase());
+
+      jcp.innerHTML = `
+        <div class="ljf-jcp-company">${escHtml(company)}</div>
+        <ul class="ljf-jcp-titles">${titles.map(ti => `<li class="ljf-jcp-title">${escHtml(ti)}</li>`).join('')}</ul>
+        ${lastDate ? `<div class="ljf-jcp-meta">Last applied: ${escHtml(lastDate)}</div>` : ''}
+        <button class="ljf-jcp-hi-btn"${hasHiRule ? ' disabled' : ''}>${hasHiRule ? '\u2713 Highlight rule exists' : '+ Add highlight rule'}</button>
+      `;
+
+      jcp.querySelector('.ljf-jcp-hi-btn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        jcp.style.display = 'none';
+        if (rules.some(r => r.type === 'companyhi' && r.value.toLowerCase() === company.toLowerCase())) {
+          setStatus('\u26A0 Highlight rule already exists for: ' + company);
+          return;
+        }
+        addRule('companyhi', company, 'Company to Highlight: ' + company);
+        clearHighlights();
+        applyAllRules();
+        if (panelOpen) renderRules();
+        setStatus('Highlight rule added for ' + company);
+      });
+
+      jcp.style.display = 'block';
+      requestAnimationFrame(() => {
+        const rect = cell.getBoundingClientRect();
+        const pw = jcp.offsetWidth, ph = jcp.offsetHeight;
+        let left = rect.left;
+        let top  = rect.bottom + 4;
+        if (left + pw > window.innerWidth - 8)  left = window.innerWidth  - pw - 8;
+        if (top  + ph > window.innerHeight - 8) top  = rect.top - ph - 4;
+        jcp.style.left = Math.max(4, left) + 'px';
+        jcp.style.top  = Math.max(4, top)  + 'px';
+      });
     }
-    styleEl.textContent = `
-      #ljf-value-input::placeholder, #ljf-label-input::placeholder, #ljf-quick-company::placeholder { color:#999 !important; }
-    `;
+
+    jcp.addEventListener('mouseenter', () => clearTimeout(jcpHide));
+    jcp.addEventListener('mouseleave', () => { jcpHide = setTimeout(() => { jcp.style.display = 'none'; }, 200); });
+
+    const jobsPane = document.getElementById('ljf-pane-jobs');
+    if (jobsPane) {
+      jobsPane.addEventListener('mouseover', e => {
+        const cell = e.target.closest('.ljf-co-cell');
+        if (cell) showCompanyPopover(cell);
+      });
+      jobsPane.addEventListener('mouseout', e => {
+        if (e.target.closest('.ljf-co-cell')) {
+          jcpHide = setTimeout(() => { jcp.style.display = 'none'; }, 200);
+        }
+      });
+    }
   }
 
   function updateTabTheme() {
@@ -869,12 +1757,20 @@ ${dismissActionsEnabled ? `
     const panel = document.getElementById('ljf-panel');
     if (!panel) return;
     const th = t();
+    buildPanelStyles();
     panel.style.background = th.panelBg;
     panel.style.color = th.panelText;
+    panel.style.width = panelWidthPx();
+    if (panelOpen) {
+      const tab = document.getElementById('ljf-tab');
+      if (tab) tab.style.right = panelWidthPx();
+    }
     panel.innerHTML = buildPanelHTML();
+    setPanelVars();
     wirePanelEvents();
     updateTabTheme();
-    if (panelOpen) renderRules();
+    if (panelOpen && activePanel === 'rules') renderRules();
+    if (panelOpen && activePanel === 'jobs')  renderJobsPane();
   }
 
   function toggleDarkMode() {
@@ -883,6 +1779,146 @@ ${dismissActionsEnabled ? `
     darkMode = !darkMode;
     GM_setValue('ljf_darkMode', darkMode ? 'dark' : 'light');
     buildPanelContent();
+  }
+
+  // ─── Onboarding modal ────────────────────────────────────────────────────────
+
+  function openOnboardingModal() {
+    if (document.getElementById('ljf-onboard-modal')) return;
+    const th = t();
+    const warnBg  = darkMode ? 'rgba(234,179,8,.12)' : '#fef9c3';
+    const warnBdr = darkMode ? 'rgba(234,179,8,.4)'  : '#ca8a04';
+    const warnClr = darkMode ? '#fde68a'             : '#7c2d12';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ljf-onboard-modal';
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:100003',
+      'background:rgba(0,0,0,.65)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+    ].join(';');
+
+    const modal = document.createElement('div');
+    modal.style.cssText = [
+      `background:${th.panelBg}`, `color:${th.panelText}`,
+      `border:1px solid ${th.border1}`, 'border-radius:8px',
+      'max-width:420px', 'width:92%', 'max-height:85vh',
+      'display:flex', 'flex-direction:column',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      'box-shadow:0 8px 32px rgba(0,0,0,.6)',
+    ].join(';');
+
+    const s = (size, color, extra = '') =>
+      `font-size:${size}px;color:${color};${extra}`;
+
+    // TODO (2026-04-12): QA and revise all onboarding copy below
+    modal.innerHTML = `
+<div style="padding:18px 20px 14px;flex-shrink:0;border-bottom:1px solid ${th.border1};">
+  <div style="${s(15, th.panelText, 'font-weight:700;margin-bottom:3px;')}">Welcome to LinkedIn Job Filter</div>
+  <div style="${s(11, th.countText)}">A quick overview — you can re-open this any time with the <strong>?</strong> button.</div>
+</div>
+
+<div style="overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px;">
+
+  <div>
+    <div style="${s(11, th.labelText, 'font-weight:700;margin-bottom:4px;')}">What it does</div>
+    <div style="${s(12, th.panelText, 'line-height:1.5;')}">This script runs in your browser on LinkedIn job search pages. It scans job cards and highlights or hides them based on rules you define — so you stop wading through roles you've already dismissed or aren't interested in.</div>
+  </div>
+
+  <div>
+    <div style="${s(11, th.labelText, 'font-weight:700;margin-bottom:4px;')}">✦ Highlight rules</div>
+    <div style="${s(12, th.panelText, 'line-height:1.5;')}">Add company or title rules to make matching cards stand out in <strong>green</strong>. Add them in the Rules tab, or hover a job card's dismiss button for a quick-add menu that lets you create a rule straight from the card.</div>
+  </div>
+
+  <div>
+    <div style="${s(11, th.labelText, 'font-weight:700;margin-bottom:4px;')}">✕ Dismiss rules</div>
+    <div style="${s(12, th.panelText, 'line-height:1.5;')}">Mark companies, job titles, or low-salary cards in <strong>red</strong>. With Dismiss Actions enabled, the script can also click LinkedIn's native dismiss button to remove matched cards from your feed — but read the note below first.</div>
+  </div>
+
+  <div style="background:${warnBg};border:1px solid ${warnBdr};border-radius:5px;padding:10px 12px;">
+    <div style="${s(11, warnClr, 'font-weight:700;margin-bottom:4px;')}">⚠ Dismiss Actions &amp; LinkedIn's Terms of Service</div>
+    <div style="${s(11, warnClr, 'line-height:1.5;')}">Automating clicks on LinkedIn's dismiss button is automated interaction with their platform and likely violates the <strong>LinkedIn User Agreement</strong>. This feature is <strong>off by default</strong>. Only enable it if you understand and accept that risk — you're responsible for how you use it.</div>
+  </div>
+
+  <div>
+    <div style="${s(11, th.labelText, 'font-weight:700;margin-bottom:4px;')}">Job log</div>
+    <div style="${s(12, th.panelText, 'line-height:1.5;')}">When you apply to a job — via Easy Apply or an external apply flow — the script logs it automatically. You can also add entries manually in the Jobs tab. Track application status, see every role you've applied to at a given company, and review stats in the footer.</div>
+  </div>
+
+  <div>
+    <div style="${s(11, th.labelText, 'font-weight:700;margin-bottom:4px;')}">Export &amp; import</div>
+    <div style="${s(12, th.panelText, 'line-height:1.5;')}">Back up your rules and job log any time via <strong>Settings → Backup</strong>. A CSV export is also available for the job log if you want to work with your data in a spreadsheet.</div>
+  </div>
+
+</div>
+
+<div style="padding:14px 20px;flex-shrink:0;border-top:1px solid ${th.border1};display:flex;justify-content:flex-end;">
+  <button id="ljf-onboard-done" style="
+    background:#4e7af7;color:#fff;border:none;border-radius:4px;
+    padding:8px 18px;cursor:pointer;font-size:13px;font-weight:600;">Got it, let's go</button>
+</div>`;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
+    modal.querySelector('#ljf-onboard-done').addEventListener('click', dismiss);
+
+    function dismiss() {
+      GM_setValue('ljf_onboarded', 'true');
+      overlay.remove();
+    }
+  }
+
+  // ─── Dismiss Actions TOS confirm ─────────────────────────────────────────────
+
+  function confirmDismissActionsEnable(onConfirm) {
+    if (document.getElementById('ljf-dismiss-confirm')) return;
+    const th = t();
+    const warnBg  = darkMode ? 'rgba(234,179,8,.12)' : '#fef9c3';
+    const warnBdr = darkMode ? 'rgba(234,179,8,.4)'  : '#ca8a04';
+    const warnClr = darkMode ? '#fde68a'             : '#7c2d12';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ljf-dismiss-confirm';
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:100004',
+      'background:rgba(0,0,0,.65)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+    ].join(';');
+
+    const modal = document.createElement('div');
+    modal.style.cssText = [
+      `background:${th.panelBg}`, `color:${th.panelText}`,
+      `border:1px solid ${th.border1}`, 'border-radius:8px',
+      'padding:20px 22px', 'max-width:340px', 'width:90%',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      'box-shadow:0 8px 32px rgba(0,0,0,.6)',
+    ].join(';');
+
+    modal.innerHTML = `
+<div style="font-size:14px;font-weight:700;margin-bottom:10px;">Enable Dismiss Actions?</div>
+<div style="background:${warnBg};border:1px solid ${warnBdr};border-radius:5px;padding:10px 12px;margin-bottom:14px;">
+  <div style="font-size:11px;color:${warnClr};font-weight:700;margin-bottom:4px;">⚠ LinkedIn Terms of Service</div>
+  <div style="font-size:11px;color:${warnClr};line-height:1.5;">
+    Dismiss Actions automates clicks on LinkedIn's native dismiss button. This constitutes automated interaction with their platform and <strong>likely violates the LinkedIn User Agreement</strong>.<br><br>
+    Only enable this if you understand and accept that risk. You are solely responsible for your use of this feature.
+  </div>
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;">
+  <button id="ljf-dc-cancel" style="
+    background:${th.rowBg};color:${th.ruleType};border:1px solid ${th.rowBorder};
+    border-radius:4px;padding:6px 12px;cursor:pointer;font-size:12px;">Cancel</button>
+  <button id="ljf-dc-confirm" style="
+    background:#b91c1c;color:#fff;border:none;
+    border-radius:4px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">I understand — Enable</button>
+</div>`;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    modal.querySelector('#ljf-dc-cancel').addEventListener('click',  () => overlay.remove());
+    modal.querySelector('#ljf-dc-confirm').addEventListener('click', () => { overlay.remove(); onConfirm(); });
   }
 
   // ─── Settings modal ───────────────────────────────────────────────────────────
@@ -994,19 +2030,40 @@ ${dismissActionsEnabled ? `
         })));
         content.appendChild(divider());
         content.appendChild(mkRow('Dismiss Actions', mkToggle(dismissActionsEnabled, checked => {
-          dismissActionsEnabled = checked;
-          GM_setValue('ljf_dismissActions', checked ? 'true' : 'false');
-          overlay.remove();
-          buildPanelContent();
-          updateTabCount();
+          if (checked && !dismissActionsEnabled) {
+            overlay.remove();
+            confirmDismissActionsEnable(() => {
+              dismissActionsEnabled = true;
+              GM_setValue('ljf_dismissActions', 'true');
+              buildPanelContent();
+              updateTabCount();
+            });
+          } else {
+            dismissActionsEnabled = checked;
+            GM_setValue('ljf_dismissActions', checked ? 'true' : 'false');
+            overlay.remove();
+            buildPanelContent();
+            updateTabCount();
+          }
         })));
       } else {
         const grid = document.createElement('div');
         grid.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
-        grid.appendChild(mkBackupBtn('\u2197 Export Rules', exportRules));
-        grid.appendChild(mkBackupBtn('\u2198 Import Rules', importRules));
-        grid.appendChild(mkBackupBtn('\u2197 Export Log',   exportAppliedLog));
-        grid.appendChild(mkBackupBtn('\u2198 Import Log',   importAppliedLog));
+        grid.appendChild(mkBackupBtn('\u2197 Export Rules',    exportRules));
+        grid.appendChild(mkBackupBtn('\u2198 Import Rules',    importRules));
+        grid.appendChild(mkBackupBtn('\u2197 Export Log',      exportAppliedLog));
+        grid.appendChild(mkBackupBtn('\u2198 Import Log',      importAppliedLog));
+        const csvLabel = document.createElement('div');
+        csvLabel.textContent = 'Job Log — CSV';
+        csvLabel.style.cssText = [
+          `color:${th.countText}`, 'font-size:10px', 'font-weight:600',
+          'letter-spacing:.5px', 'text-transform:uppercase',
+          `border-top:1px solid ${th.border2}`, 'padding-top:8px', 'margin-top:2px',
+        ].join(';');
+        grid.appendChild(csvLabel);
+        grid.appendChild(mkBackupBtn('\u2197 Export Log CSV',      exportAppliedLogCsv));
+        grid.appendChild(mkBackupBtn('\u2198 Import Log CSV',      importAppliedLogCsv));
+        grid.appendChild(mkBackupBtn('\u2B07 Download CSV Template', downloadLogCsvTemplate));
         content.appendChild(grid);
       }
     }
@@ -1110,8 +2167,7 @@ ${dismissActionsEnabled ? `
       : (label || typeLabel + ': ' + value);
 
     if (editingRuleId !== null) {
-      const id = editingRuleId;
-      updateRule(id, value, finalLabel);
+      updateRule(editingRuleId, value, finalLabel);
       cancelEdit();
       clearHighlights();
       applyAllRules();
@@ -1385,6 +2441,112 @@ ${dismissActionsEnabled ? `
     });
   }
 
+  // ─── Applied Log CSV Export / Import ─────────────────────────────────────────
+
+  const LOG_CSV_HEADERS = ['company', 'title', 'date', 'status', 'statusDate', 'url', 'notes'];
+
+  function csvEscape(val) {
+    const s = String(val == null ? '' : val);
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+      ? '"' + s.replace(/"/g, '""') + '"'
+      : s;
+  }
+
+  function parseCsvLine(line) {
+    const fields = [];
+    let i = 0;
+    while (i <= line.length) {
+      if (line[i] === '"') {
+        let val = '';
+        i++;
+        while (i < line.length) {
+          if (line[i] === '"' && line[i + 1] === '"') { val += '"'; i += 2; }
+          else if (line[i] === '"') { i++; break; }
+          else { val += line[i++]; }
+        }
+        fields.push(val);
+        if (line[i] === ',') i++;
+      } else {
+        const end = line.indexOf(',', i);
+        if (end === -1) { fields.push(line.slice(i)); break; }
+        fields.push(line.slice(i, end));
+        i = end + 1;
+      }
+    }
+    return fields;
+  }
+
+  function parseCsv(text) {
+    return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      .split('\n').filter(l => l.trim()).map(parseCsvLine);
+  }
+
+  function exportAppliedLogCsv() {
+    const rows = [LOG_CSV_HEADERS.join(',')];
+    for (const e of appliedLog) {
+      rows.push([e.company, e.title, e.date, e.status || 'applied',
+                 e.statusDate || '', e.url || '', e.notes || ''].map(csvEscape).join(','));
+    }
+    const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'linkedin-applied-log.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus('Applied log exported as CSV (' + appliedLog.length + ' entr' + (appliedLog.length !== 1 ? 'ies' : 'y') + ').');
+  }
+
+  function importAppliedLogCsv() {
+    const input  = document.createElement('input');
+    input.type   = 'file';
+    input.accept = '.csv,text/csv';
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        try {
+          const rows = parseCsv(reader.result);
+          if (rows.length < 2) { setStatus('\u26A0 CSV has no data rows.'); return; }
+          const headers = rows[0].map(h => h.trim().toLowerCase());
+          const get = (row, name) => {
+            const idx = headers.indexOf(name);
+            return idx >= 0 ? (row[idx] || '').trim() : '';
+          };
+          const incoming = rows.slice(1).map(row => ({
+            company:    get(row, 'company'),
+            title:      get(row, 'title'),
+            date:       get(row, 'date'),
+            status:     get(row, 'status') || 'applied',
+            statusDate: get(row, 'statusdate'),
+            url:        get(row, 'url'),
+            notes:      get(row, 'notes'),
+          })).filter(e => e.company && e.title && e.date);
+          if (!incoming.length) { setStatus('\u26A0 No valid entries in CSV (need company + title + date).'); return; }
+          showLogImportDialog(incoming);
+        } catch {
+          setStatus('\u26A0 Failed to parse CSV file.');
+        }
+      });
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  function downloadLogCsvTemplate() {
+    const sample = ['Acme Corp', 'Software Engineer', new Date().toISOString().slice(0, 10),
+                    'applied', '', 'https://www.linkedin.com/jobs/view/123456789', ''];
+    const csv = LOG_CSV_HEADERS.join(',') + '\n' + sample.map(csvEscape).join(',') + '\n';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'linkedin-job-log-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   function renderRules() {
@@ -1441,27 +2603,15 @@ ${dismissActionsEnabled ? `
   }
 
   function renderAppliedBlock(rule) {
-    const th = t();
     const div = document.createElement('div');
-    div.style.cssText = [
-      'padding:8px 10px', 'margin-bottom:4px',
-      `background:${th.dimRowBg}`, `border:1px solid ${th.dimRowBorder}`, 'border-radius:5px',
-    ].join(';');
+    div.className = 'ljf-block ljf-dim';
 
     const enabled = rule ? rule.enabled : true;
     div.innerHTML = `
-<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-  <span style="font-size:12px;color:${th.ruleLabel};font-weight:600;flex:1;">LinkedIn Applied Label</span>
-  ${dismissActionsEnabled ? `<button class="ljf-applied-dismiss" title="Dismiss all matching cards" style="
-    flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
-    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>` : ''}
-  <button class="ljf-applied-toggle" title="${enabled ? 'Disable rule' : 'Enable rule'}" style="
-    flex-shrink:0;border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
-    font-size:13px;font-weight:900;line-height:1;text-align:center;
-    ${enabled
-      ? `background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};`
-      : `background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};`
-    }">${enabled ? '✓' : '✕'}</button>
+<div class="ljf-block-row">
+  <span class="ljf-block-title" style="flex:1;">LinkedIn Applied Label</span>
+  ${dismissActionsEnabled ? `<button class="ljf-applied-dismiss ljf-btn-dismiss" title="Dismiss all matching cards">✕ dismiss</button>` : ''}
+  <button class="ljf-applied-toggle ljf-btn-toggle ${enabled ? 'ljf-on' : 'ljf-off'}" title="${enabled ? 'Disable rule' : 'Enable rule'}">${enabled ? '✓' : '✕'}</button>
 </div>`;
 
     div.querySelector('.ljf-applied-toggle').addEventListener('click', e => {
@@ -1487,30 +2637,18 @@ ${dismissActionsEnabled ? `
   }
 
   function renderJobLogBlock() {
-    const th  = t();
     const count = appliedLog.length;
     const div = document.createElement('div');
-    div.style.cssText = [
-      'padding:8px 10px', 'margin-bottom:4px',
-      `background:${th.logRowBg}`, `border:1px solid ${th.logRowBorder}`, 'border-radius:5px',
-    ].join(';');
+    div.className = 'ljf-block ljf-log';
 
     div.innerHTML = `
-<div style="font-size:12px;color:${th.ruleLabel};font-weight:600;margin-bottom:5px;">Jobs Applied Log</div>
-<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-  <span style="font-size:12px;color:${th.ruleLabel};font-weight:600;flex:1;">
-    Job Log <span style="font-weight:400;font-size:10px;color:${th.countText};">(${count} entr${count !== 1 ? 'ies' : 'y'})</span>
+<div class="ljf-block-title ljf-mb5">Jobs Applied Log</div>
+<div class="ljf-block-row">
+  <span class="ljf-block-title" style="flex:1;">
+    Job Log <span style="font-weight:400;font-size:10px;" class="ljf-hdr-count">(${count} entr${count !== 1 ? 'ies' : 'y'})</span>
   </span>
-  ${dismissActionsEnabled ? `<button class="ljf-joblog-dismiss" title="Dismiss all matching cards" style="
-    flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
-    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>` : ''}
-  <button class="ljf-joblog-toggle" title="${jobLogEnabled ? 'Disable job log matching' : 'Enable job log matching'}" style="
-    flex-shrink:0;border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
-    font-size:13px;font-weight:900;line-height:1;text-align:center;
-    ${jobLogEnabled
-      ? `background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};`
-      : `background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};`
-    }">${jobLogEnabled ? '✓' : '✕'}</button>
+  ${dismissActionsEnabled ? `<button class="ljf-joblog-dismiss ljf-btn-dismiss" title="Dismiss all matching cards">✕ dismiss</button>` : ''}
+  <button class="ljf-joblog-toggle ljf-btn-toggle ${jobLogEnabled ? 'ljf-on' : 'ljf-off'}" title="${jobLogEnabled ? 'Disable job log matching' : 'Enable job log matching'}">${jobLogEnabled ? '✓' : '✕'}</button>
 </div>`;
 
     div.querySelector('.ljf-joblog-toggle').addEventListener('click', e => {
@@ -1532,35 +2670,23 @@ ${dismissActionsEnabled ? `
   }
 
   function renderSalaryBlock(type, rule, isHighlight = false) {
-    const th = t();
     const typeLabel = RULE_TYPES[type].label;
     const hasValue  = !!(rule && rule.value);
     const display   = hasValue ? ('$' + rule.value + 'k') : 'Not set';
+    const blockMod  = hasValue ? (isHighlight ? 'ljf-hi' : 'ljf-dim') : 'ljf-salary-off';
 
     const div = document.createElement('div');
-    const activeBg     = isHighlight ? th.hiRowBg     : th.dimRowBg;
-    const activeBorder = isHighlight ? th.hiRowBorder  : th.dimRowBorder;
-    div.style.cssText = [
-      'padding:8px 10px', 'margin-bottom:4px', 'cursor:pointer',
-      `background:${hasValue ? activeBg : th.salaryOffBg}`,
-      `border:1px solid ${hasValue ? activeBorder : th.salaryOffBorder}`,
-      'border-radius:5px',
-    ].join(';');
+    div.className = 'ljf-block ' + blockMod;
 
     div.innerHTML = `
-<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-  <div style="flex:1;min-width:0;">
-    <div style="font-size:12px;color:${hasValue ? th.salaryOnTitle : th.salaryOffTitle};font-weight:600;">${escHtml(typeLabel)}</div>
-    <div style="font-size:11px;color:${hasValue ? th.salaryOnVal : th.salaryOffVal};margin-top:2px;">${escHtml(display)}</div>
+<div class="ljf-block-row">
+  <div class="ljf-block-left">
+    <div class="ljf-block-title ${hasValue ? 'ljf-salary-on' : 'ljf-salary-off'}">${escHtml(typeLabel)}</div>
+    <div class="ljf-block-val ${hasValue ? 'ljf-salary-on' : 'ljf-salary-off'}">${escHtml(display)}</div>
   </div>
   ${hasValue ? `
-  ${(!isHighlight && dismissActionsEnabled) ? `<button class="ljf-salary-dismiss" title="Dismiss all matching cards" style="
-    flex-shrink:0;background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};
-    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:10px;white-space:nowrap;">✕ dismiss</button>` : ''}
-  <button class="ljf-salary-clear" title="Remove this rule" style="
-    flex-shrink:0;background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};
-    border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
-    font-size:13px;font-weight:900;line-height:1;text-align:center;">✕</button>` : ''}
+  ${(!isHighlight && dismissActionsEnabled) ? `<button class="ljf-salary-dismiss ljf-btn-dismiss" title="Dismiss all matching cards">✕ dismiss</button>` : ''}
+  <button class="ljf-salary-clear ljf-btn-del" title="Remove this rule">✕</button>` : ''}
 </div>`;
 
     div.addEventListener('click', e => {
@@ -1603,19 +2729,13 @@ ${dismissActionsEnabled ? `
 
   // subKeys: the two group keys controlled by this section header
   function renderSectionHeader(label, sectionKey, subKeys) {
-    const th = t();
     const sectionCollapsed = collapsedSections[sectionKey];
     const arrow = sectionCollapsed ? '▸' : '▾';
     const div = document.createElement('div');
-    div.style.cssText = [
-      'display:flex', 'align-items:center', 'gap:6px',
-      `font-size:11px;color:${th.panelText}`, 'font-weight:700',
-      'text-transform:uppercase', 'letter-spacing:.7px',
-      'padding:6px 0 5px', 'cursor:pointer', 'user-select:none',
-    ].join(';');
+    div.className = 'ljf-section-hdr';
     div.innerHTML =
       `<span>${escHtml(label)}</span>` +
-      `<span style="font-size:22px;color:${th.arrowText};margin-left:4px;line-height:0;position:relative;top:-2px;">${arrow}</span>`;
+      `<span class="ljf-hdr-arrow">${arrow}</span>`;
     div.addEventListener('click', () => {
       if (sectionCollapsed) {
         // expand section and all subgroups
@@ -1632,20 +2752,14 @@ ${dismissActionsEnabled ? `
   }
 
   function renderGroupHeader(label, count, sectionKey) {
-    const th = t();
     const collapsed = collapsedSections[sectionKey];
     const arrow = collapsed ? '▸' : '▾';
     const div = document.createElement('div');
-    div.style.cssText = [
-      'display:flex', 'align-items:center', 'gap:5px',
-      `font-size:10px;color:${th.sectionTitle}`, 'text-transform:uppercase',
-      'letter-spacing:.6px', 'padding:10px 0 4px',
-      'cursor:pointer', 'user-select:none',
-    ].join(';');
+    div.className = 'ljf-group-hdr';
     div.innerHTML =
       `<span>${escHtml(label)}</span>` +
-      `<span style="color:${th.countText};">(${count})</span>` +
-      (count > 0 ? `<span style="font-size:22px;color:${th.arrowText};margin-left:4px;line-height:0;position:relative;top:-2px;">${arrow}</span>` : '');
+      `<span class="ljf-hdr-count">(${count})</span>` +
+      (count > 0 ? `<span class="ljf-hdr-arrow">${arrow}</span>` : '');
     div.addEventListener('click', () => {
       if (count === 0) return;
       collapsedSections[sectionKey] = !collapsedSections[sectionKey];
@@ -1655,37 +2769,23 @@ ${dismissActionsEnabled ? `
   }
 
   function renderRuleRow(rule) {
-    const th = t();
-    const isHiRule  = !!RULE_TYPES[rule.type]?.highlight;
-    const rowBg     = isHiRule ? th.hiRowBg     : th.dimRowBg;
-    const rowBorder = isHiRule ? th.hiRowBorder  : th.dimRowBorder;
+    const isHiRule = !!RULE_TYPES[rule.type]?.highlight;
     const row = document.createElement('div');
-    row.style.cssText = [
-      'display:flex', 'align-items:center', 'gap:7px',
-      'padding:7px 8px', 'margin-bottom:3px',
-      `background:${rowBg}`, `border:1px solid ${rowBorder}`,
-      'border-radius:4px',
-    ].join(';');
+    row.className = 'ljf-rule-row ' + (isHiRule ? 'ljf-hi' : 'ljf-dim');
 
-    const safeLabel  = escHtml(rule.label);
-    const typeLabel  = escHtml(RULE_TYPES[rule.type]?.label || rule.type);
+    const safeLabel = escHtml(rule.label);
+    const typeLabel = escHtml(RULE_TYPES[rule.type]?.label || rule.type);
 
     row.innerHTML = `
 <input type="checkbox" class="ljf-toggle" data-id="${rule.id}"
   ${rule.enabled ? 'checked' : ''}
   style="cursor:pointer;accent-color:#b91c1c;flex-shrink:0;margin:0;"/>
-<div class="ljf-row-label" style="flex:1;min-width:0;cursor:pointer;" title="Click to edit">
-  <div style="font-size:12px;color:${th.ruleLabel};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-    title="${safeLabel}">${safeLabel}</div>
-  <div style="font-size:10px;color:${th.ruleType};margin-top:1px;">${typeLabel}</div>
+<div class="ljf-row-label" title="Click to edit">
+  <div class="ljf-row-value" title="${safeLabel}">${safeLabel}</div>
+  <div class="ljf-row-type">${typeLabel}</div>
 </div>
-${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one" data-id="${rule.id}" title="Dismiss all matches for this rule" style="
-  background:${th.greenBg};color:${th.greenText};border:1px solid ${th.greenBorder};border-radius:3px;
-  padding:3px 8px;cursor:pointer;font-size:10px;flex-shrink:0;white-space:nowrap;">✕ dismiss</button>` : ''}
-<button class="ljf-del" data-id="${rule.id}" title="Delete rule" style="
-  flex-shrink:0;background:${th.redBg};color:${th.redText};border:1px solid ${th.redBorder};
-  border-radius:3px;width:28px;height:22px;padding:0;cursor:pointer;
-  font-size:13px;font-weight:900;line-height:1;text-align:center;">✕</button>`;
+${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dismiss" data-id="${rule.id}" title="Dismiss all matches for this rule">✕ dismiss</button>` : ''}
+<button class="ljf-del ljf-btn-del" data-id="${rule.id}" title="Delete rule">✕</button>`;
 
     row.querySelector('.ljf-row-label').addEventListener('click', () => populateFormForEdit(rule));
 
@@ -1867,6 +2967,7 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one" data-id="$
   const DETAIL_COMPANY_SEL = '.jobs-unified-top-card__company-name a, .job-details-jobs-unified-top-card__company-name a';
   const YES_BTN_SEL        = '[data-view-name="offsite-apply-confirmation-banner-reply-yes"]';
   const EASY_APPLY_SUBMIT  = '[data-live-test-easy-apply-submit-button]';
+  const VIEW_CONFIRM_SEL   = '[componentkey="AppliedHowYouFitSlot"]';
 
   function captureAppliedJob() {
     const titleEl   = document.querySelector(DETAIL_TITLE_SEL);
@@ -1938,6 +3039,60 @@ function setupApplyCapture() {
     }, true);
   }
 
+  function captureViewPageAppliedJob() {
+    // Parse "Job Title | Company Name | LinkedIn" from document.title
+    const parts   = document.title.split(' | ');
+    const title   = (parts[0] || '').trim();
+    const company = (parts[1] || '').trim();
+    if (!title && !company) return;
+
+    const jobIdM = window.location.pathname.match(/\/jobs\/view\/(\d+)/);
+    const url    = jobIdM
+      ? 'https://www.linkedin.com/jobs/view/' + jobIdM[1] + '/'
+      : window.location.href;
+
+    const dup = appliedLog.find(e =>
+      e.company.toLowerCase() === company.toLowerCase() &&
+      e.title.toLowerCase()   === title.toLowerCase()
+    );
+    if (dup) {
+      setStatus('\u2139 Already in log: ' + (title || company));
+      return;
+    }
+
+    const date = new Date().toISOString().slice(0, 10);
+    appliedLog.push({ company, title, date, url });
+    saveAppliedLog();
+    clearHighlights();
+    applyAllRules();
+    if (panelOpen) renderRules();
+
+    const htmlText  = '<table><tr><td>' + company + '</td><td>' + title + '</td><td><a href="' + url + '">' + url + '</a></td></tr></table>';
+    const plainText = company + '\t' + title + '\t' + url;
+    navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html':  new Blob([htmlText],  { type: 'text/html' }),
+        'text/plain': new Blob([plainText], { type: 'text/plain' }),
+      }),
+    ]).catch(() => navigator.clipboard.writeText(plainText));
+
+    setStatus('\u2713 Logged & copied: ' + (title || company));
+  }
+
+  function setupViewPageApplyCapture() {
+    if (!/\/jobs\/view\/\d+/.test(window.location.pathname)) return;
+
+    let captured = false;
+    const observer = new MutationObserver(() => {
+      if (captured) return;
+      if (!document.querySelector(VIEW_CONFIRM_SEL)) return;
+      captured = true;
+      observer.disconnect();
+      captureViewPageAppliedJob();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
   // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
   function maybeBootstrap() {
@@ -1951,10 +3106,14 @@ function setupApplyCapture() {
     buildUI();
     setupCardHoverMenu();
     setupApplyCapture();
+    setupViewPageApplyCapture();
     setTimeout(() => {
       const n = applyAllRules();
       setStatus('Initial scan \u2014 ' + n + ' card(s) matched.');
     }, 1800);
+    if (GM_getValue('ljf_onboarded', 'false') !== 'true') {
+      setTimeout(openOnboardingModal, 600);
+    }
   }
 
   if (document.readyState === 'loading') {
