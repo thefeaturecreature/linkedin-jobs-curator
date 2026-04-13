@@ -132,6 +132,8 @@
   let panelOpen          = false;
   let activePanel        = GM_getValue('ljf_activePanel', 'rules');
   let jobSort            = { col: 'date', dir: 'desc' };
+  let companyFilter      = '';
+  let companyFilterOpen  = false;
   let editingRuleId      = null;
   let editingOrigType    = null;
   let collapsedSections  = {
@@ -299,6 +301,25 @@
   border-radius:3px;width:22px;height:18px;padding:0;
   cursor:pointer;font-weight:900;line-height:1;text-align:center;border:1px solid;
   background:var(--ljf-red-bg);color:var(--ljf-red-text);border-color:var(--ljf-red-border); }
+#ljf-panel .ljf-co-filter-btn {
+  display:inline-flex;align-items:center;justify-content:center;
+  width:13px;height:13px;border-radius:50%;
+  border:1px solid var(--ljf-border1);background:transparent;cursor:pointer;
+  color:var(--ljf-count-text);padding:0;margin-left:4px;vertical-align:middle;flex-shrink:0; }
+#ljf-panel .ljf-co-filter-btn.ljf-co-filter-active { color:var(--ljf-tab-accent);border-color:var(--ljf-tab-accent); }
+#ljf-panel #ljf-co-filter-row td {
+  background:var(--ljf-header-bg);border-bottom:1px solid var(--ljf-border1);
+  padding:3px 6px;position:sticky;top:24px;z-index:10; }
+#ljf-panel .ljf-co-filter-wrap { display:flex;align-items:center;gap:4px; }
+#ljf-panel #ljf-co-filter-input {
+  flex:1;min-width:0;font-size:11px;padding:2px 6px;
+  border:1px solid var(--ljf-border2);border-radius:3px;
+  background:var(--ljf-form-bg);color:var(--ljf-panel-text);outline:none; }
+#ljf-panel .ljf-co-filter-clear {
+  flex-shrink:0;width:15px;height:15px;border-radius:50%;
+  border:1px solid var(--ljf-border1);background:transparent;cursor:pointer;
+  color:var(--ljf-count-text);font-size:9px;font-weight:900;
+  display:flex;align-items:center;justify-content:center;padding:0; }
 #ljf-panel .ljf-jobs-footer {
   display:flex;justify-content:space-between;align-items:center;
   flex-shrink:0;padding:5px 10px;font-size:10px;
@@ -415,12 +436,14 @@
       interviewing: { bg:'#332800', text:'#d4a800', bdr:'#554400' },
       offer:        { bg:'#0a2a0a', text:'#5cb85c', bdr:'#1a5a1a' },
       rejected:     { bg:'#2a0a0a', text:'#c05555', bdr:'#5a1a1a' },
+      closed:       { bg:'#1a1220', text:'#9966cc', bdr:'#442266' },
       withdrawn:    { bg:'#1a1a1a', text:'#666',    bdr:'#333'    },
     } : {
       applied:      { bg:'#f0f0f0', text:'#555',    bdr:'#ccc'    },
       interviewing: { bg:'#fffbe6', text:'#7a5c00', bdr:'#c8a200' },
       offer:        { bg:'#edfaed', text:'#1a6b1a', bdr:'#5cb85c' },
       rejected:     { bg:'#faeded', text:'#8b0000', bdr:'#c05555' },
+      closed:       { bg:'#f3eefa', text:'#6633aa', bdr:'#c9a0e8' },
       withdrawn:    { bg:'#f5f5f5', text:'#888',    bdr:'#ccc'    },
     };
     return map[s] || map.applied;
@@ -429,13 +452,14 @@
   function computeStats(log) {
     const total = log.length;
     if (total === 0) return '';
-    const counts = { applied: 0, interviewing: 0, offer: 0, rejected: 0, withdrawn: 0 };
+    const counts = { applied: 0, interviewing: 0, offer: 0, rejected: 0, closed: 0, withdrawn: 0 };
     for (const e of log) counts[e.status || 'applied']++;
-    const responded = counts.interviewing + counts.offer + counts.rejected;
+    const responded = counts.interviewing + counts.offer + counts.closed;
     const pills = [];
+    pills.push(total + ' apps');
     if (responded > 0) pills.push(Math.round(responded / total * 100) + '% response');
-    if (counts.offer > 0) pills.push(Math.round(counts.offer / total * 100) + '% offer');
-    if (counts.rejected > 0) pills.push(Math.round(counts.rejected / total * 100) + '% rejected');
+    if (counts.rejected > 0) pills.push(Math.round(counts.rejected / total * 100) + '% ghosted');
+    if (counts.interviewing > 0) pills.push(counts.interviewing + ' interviewing');
     return pills.map(p => `<span class="ljf-stat-pill">${p}</span>`).join('');
   }
 
@@ -462,6 +486,7 @@
       // tiebreak: preserve original index order (asc = earliest added first, desc = latest added first)
       return jobSort.dir === 'asc' ? ai - bi : bi - ai;
     });
+    const magSvg = `<svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4"/><line x1="10" y1="10" x2="14" y2="14"/></svg>`;
     const headerCells = COLS.map(col => {
       const active = jobSort.col === col;
       const sortable = SORTABLE.has(col);
@@ -471,12 +496,15 @@
         sortable ? 'ljf-sortable'    : '',
         col === 'days' ? 'ljf-center' : '',
       ].filter(Boolean).join(' ');
+      const filterBtn = col === 'company'
+        ? `<button class="ljf-co-filter-btn${companyFilter || companyFilterOpen ? ' ljf-co-filter-active' : ''}" title="Filter by company">${magSvg}</button>`
+        : '';
       return `<th data-sort="${col}" class="${cls}" style="width:${WIDTHS[col]};">
-        ${LABELS[col]}${arrow ? `<span class="ljf-sort-arrow">${arrow}</span>` : ''}
+        ${LABELS[col]}${arrow ? `<span class="ljf-sort-arrow">${arrow}</span>` : ''}${filterBtn}
       </th>`;
     }).join('');
 
-    const STATUS_OPTIONS = ['applied','interviewing','offer','rejected','withdrawn'];
+    const STATUS_OPTIONS = ['applied','interviewing','offer','rejected','closed','withdrawn'];
     const _now = new Date();
     const today = [_now.getFullYear(), String(_now.getMonth() + 1).padStart(2, '0'), String(_now.getDate()).padStart(2, '0')].join('-');
     const companies = [...new Set(appliedLog.map(e => e.company).filter(Boolean))].sort();
@@ -499,7 +527,7 @@
           const liIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" focusable="false" class="ljf-li-icon">
             <path d="M15 2v12a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1h12a1 1 0 011 1zM5 6H3v7h2zm.25-2A1.25 1.25 0 104 5.25 1.25 1.25 0 005.25 4zM13 9.29c0-2.2-.73-3.49-2.86-3.49A2.71 2.71 0 007.89 7V6H6v7h2V9.73a1.73 1.73 0 011.52-1.92h.14C10.82 7.8 11 8.94 11 9.73V13h2z" fill="#0a66c2"></path>
           </svg>`;
-          return `<tr data-log-idx="${logIdx}">
+          return `<tr data-log-idx="${logIdx}" data-company="${escHtml(company.toLowerCase())}">
             <td class="ljf-col-trunc ljf-co-cell" data-company="${escHtml(company)}" title="${escHtml(company)}">${escHtml(company)}</td>
             <td class="ljf-col-trunc" title="${escHtml(title)}">${escHtml(title)}</td>
             <td class="ljf-col-muted">${escHtml(dateStr) || '—'}</td>
@@ -523,7 +551,17 @@
 <datalist id="ljf-ti-list">${tiOptions}</datalist>
 <div class="ljf-jobs-scroll">
   <table class="ljf-jobs-table">
-    <thead><tr>${headerCells}</tr></thead>
+    <thead>
+      <tr>${headerCells}</tr>
+      <tr id="ljf-co-filter-row"${companyFilterOpen || companyFilter ? '' : ' style="display:none"'}>
+        <td colspan="7">
+          <div class="ljf-co-filter-wrap">
+            <input id="ljf-co-filter-input" type="text" placeholder="Filter by company…" value="${escHtml(companyFilter)}" autocomplete="off">
+            <button class="ljf-co-filter-clear" title="Clear filter">✕</button>
+          </div>
+        </td>
+      </tr>
+    </thead>
     <tbody>${rows}</tbody>
   </table>
 </div>
@@ -560,6 +598,47 @@
         renderJobsPane();
       });
     });
+
+    // Company filter
+    function applyCompanyFilter() {
+      const q = companyFilter.toLowerCase();
+      let visible = 0;
+      pane.querySelectorAll('tbody tr[data-log-idx]').forEach(tr => {
+        const show = !q || (tr.dataset.company || '').includes(q);
+        tr.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      const countEl = pane.querySelector('.ljf-footer-stats span');
+      if (countEl) {
+        const total = appliedLog.length;
+        countEl.textContent = q
+          ? visible + ' of ' + total + ' application' + (total === 1 ? '' : 's')
+          : total + ' application' + (total === 1 ? '' : 's');
+      }
+    }
+
+    pane.querySelector('.ljf-co-filter-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      companyFilterOpen = !companyFilterOpen;
+      const filterRow = pane.querySelector('#ljf-co-filter-row');
+      if (filterRow) filterRow.style.display = companyFilterOpen || companyFilter ? '' : 'none';
+      if (companyFilterOpen) pane.querySelector('#ljf-co-filter-input')?.focus();
+    });
+
+    pane.querySelector('#ljf-co-filter-input')?.addEventListener('input', e => {
+      companyFilter = e.target.value;
+      applyCompanyFilter();
+    });
+
+    pane.querySelector('.ljf-co-filter-clear')?.addEventListener('click', () => {
+      companyFilter = '';
+      companyFilterOpen = false;
+      const filterRow = pane.querySelector('#ljf-co-filter-row');
+      if (filterRow) filterRow.style.display = 'none';
+      applyCompanyFilter();
+    });
+
+    applyCompanyFilter();
 
     // Status dropdown change handlers
     pane.querySelectorAll('.ljf-status-sel').forEach(sel => {
@@ -755,13 +834,22 @@
   // Applies the same salary regex to a raw text string (for view-page salary extraction).
   function parseSalaryText(text) {
     const all = [];
-    const regex = /\$([\d,]+(?:\.\d+)?)([Kk]?)(?:\s*(?:[\/\\]\s*)?(yr|year|mo|month|hr|hour))?/g;
+    // Two anchored patterns to avoid matching arbitrary dollar amounts in description text:
+    //   1) K-suffix:      $175K, $175.5k
+    //   2) Comma-grouped: $200,000  $1,250,000
+    const regex = /\$([\d,]+(?:\.\d+)?)([Kk])(?:\s*(?:[\/\\]\s*)?(yr|year|mo|month|hr|hour))?|\$(\d{1,3}(?:,\d{3})+)(?:\s*(?:[\/\\]\s*)?(yr|year|mo|month|hr|hour))?/g;
     let m;
     while ((m = regex.exec(text))) {
-      let amount = parseFloat(m[1].replace(/,/g, ''));
+      let amount, unit;
+      if (m[2]) {
+        amount = parseFloat(m[1].replace(/,/g, '')) * 1000;
+        unit = m[3];
+      } else {
+        amount = parseFloat(m[4].replace(/,/g, ''));
+        unit = m[5];
+      }
       if (isNaN(amount)) continue;
-      if (m[2] && /[Kk]/.test(m[2])) amount *= 1000;
-      all.push(toAnnual(amount, normalizeUnit(m[3])));
+      all.push(toAnnual(amount, normalizeUnit(unit)));
     }
     return all;
   }
@@ -847,7 +935,7 @@
       'position:absolute', `bottom:${6 + n * 20}px`, 'right:20px',
       `background:${bg}`, 'color:#fff',
       'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
-      'pointer-events:none', 'z-index:9999',
+      'pointer-events:none', 'z-index:2',
       'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
     ].join(';');
     card.appendChild(badge);
@@ -884,6 +972,18 @@
     if (dismissMatches.some(r => r.type === 'salarybelow') &&
         dismissMatches.some(r => r.type === 'topsalarybelow')) {
       shownDismiss = dismissMatches.filter(r => r.type !== 'salarybelow');
+    }
+
+    // If a job log entry exists for this card, suppress the 'applied' rule badge —
+    // actJobLog will render "Applied on [date]" and handle card color itself.
+    const hasLogEntry = shownDismiss.some(r => r.type === 'applied') && matchJobLog(card);
+    if (hasLogEntry) {
+      shownDismiss = shownDismiss.filter(r => r.type !== 'applied');
+    }
+
+    if (!shownDismiss.length && !shownHighlight.length) {
+      card.dataset.ljfRulesApplied = '1';
+      return dismissMatches.length + highlightMatches.length;
     }
 
     card.style.position = 'relative';
@@ -956,7 +1056,7 @@
       'position:absolute', `bottom:${6 + n * 20}px`, 'right:20px',
       `background:${isRecent ? CC.recentBadge : CC.staleBadge}`, 'color:#fff',
       'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
-      'pointer-events:none', 'z-index:9999',
+      'pointer-events:none', 'z-index:2',
       'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
       'display:inline-flex', 'align-items:center', 'gap:4px',
     ].join(';');
@@ -1073,10 +1173,10 @@
     badge.className = 'ljf-badge';
     badge.textContent = text;
     badge.style.cssText = [
-      'position:absolute', `bottom:${6 + n * 20}px`, 'right:20px',
+      'position:absolute', `top:${52 + n * 20}px`, 'right:20px',
       `background:${bg}`, 'color:#fff',
       'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
-      'pointer-events:none', 'z-index:9999',
+      'pointer-events:none', 'z-index:2',
       'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
     ].join(';');
     hero.appendChild(badge);
@@ -1109,6 +1209,7 @@
     if (!/\/jobs\/view\/\d+/.test(window.location.pathname)) return;
     const hero = getViewHero();
     if (!hero) return;
+    if (hero.dataset.ljfViewProcessed) return; // already done this render cycle
 
     hero.querySelectorAll('.ljf-badge').forEach(b => b.remove());
     hero.style.removeProperty('background-color');
@@ -1198,10 +1299,10 @@
       badge.className = 'ljf-badge';
       const bCount = hero.querySelectorAll('.ljf-badge').length;
       badge.style.cssText = [
-        'position:absolute', `bottom:${6 + bCount * 20}px`, 'right:20px',
+        'position:absolute', `top:${52 + bCount * 20}px`, 'right:20px',
         `background:${isRecent ? CC.recentBadge : CC.staleBadge}`, 'color:#fff',
         'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
-        'pointer-events:none', 'z-index:9999',
+        'pointer-events:none', 'z-index:2',
         'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
         'display:inline-flex', 'align-items:center', 'gap:4px',
       ].join(';');
@@ -1224,6 +1325,8 @@
         hero.style.setProperty('box-sizing', 'border-box', 'important');
       }
     }
+
+    hero.dataset.ljfViewProcessed = '1';
   }
 
   // ─── Saved-jobs page highlighting ────────────────────────────────────────────
@@ -1317,7 +1420,7 @@
           'position:absolute', `bottom:${6 + bCount * 20}px`, 'right:20px',
           `background:${isRecent ? CC.recentBadge : CC.staleBadge}`, 'color:#fff',
           'font-size:10px', 'padding:2px 7px', 'border-radius:3px',
-          'pointer-events:none', 'z-index:9999',
+          'pointer-events:none', 'z-index:2',
           'font-family:-apple-system,BlinkMacSystemFont,sans-serif', 'line-height:1.4',
           'display:inline-flex', 'align-items:center', 'gap:4px',
         ].join(';');
@@ -1403,6 +1506,7 @@
       hero.style.removeProperty('border-left');
       hero.style.removeProperty('box-sizing');
       delete hero.dataset.ljfHero;
+      delete hero.dataset.ljfViewProcessed;
     }
     for (const card of document.querySelectorAll(SAVED_CARD_SEL)) {
       card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
@@ -2426,7 +2530,7 @@
       overlay.remove();
       clearHighlights();
       applyAllRules();
-      if (panelOpen) renderRules();
+      if (panelOpen) { renderRules(); renderJobsPane(); }
       setStatus('Log imported \u2014 ' + incoming.length + ' entr' + (incoming.length !== 1 ? 'ies' : 'y') + ' appended.');
     });
 
@@ -2436,7 +2540,7 @@
       overlay.remove();
       clearHighlights();
       applyAllRules();
-      if (panelOpen) renderRules();
+      if (panelOpen) { renderRules(); renderJobsPane(); }
       setStatus('Log imported \u2014 ' + incoming.length + ' entr' + (incoming.length !== 1 ? 'ies' : 'y') + ' (replaced).');
     });
   }
@@ -2518,7 +2622,7 @@
             company:    get(row, 'company'),
             title:      get(row, 'title'),
             date:       get(row, 'date'),
-            status:     get(row, 'status') || 'applied',
+            status:     (get(row, 'status') || 'applied').toLowerCase(),
             statusDate: get(row, 'statusdate'),
             url:        get(row, 'url'),
             notes:      get(row, 'notes'),
@@ -2535,9 +2639,16 @@
   }
 
   function downloadLogCsvTemplate() {
-    const sample = ['Acme Corp', 'Software Engineer', new Date().toISOString().slice(0, 10),
-                    'applied', '', 'https://www.linkedin.com/jobs/view/123456789', ''];
-    const csv = LOG_CSV_HEADERS.join(',') + '\n' + sample.map(csvEscape).join(',') + '\n';
+    const today = new Date().toISOString().slice(0, 10);
+    const samples = [
+      ['Acme Corp',    'Software Engineer', today, 'applied',      '',      'https://www.linkedin.com/jobs/view/123456789', ''],
+      ['Beta Inc',     'Senior Engineer',   today, 'interviewing', today,   'https://www.linkedin.com/jobs/view/234567890', 'Phone screen done'],
+      ['Gamma LLC',    'Staff Engineer',    today, 'offer',        today,   'https://www.linkedin.com/jobs/view/345678901', ''],
+      ['Delta Co',     'Engineering Lead',  today, 'rejected',     today,   'https://www.linkedin.com/jobs/view/456789012', 'No response after apply'],
+      ['Epsilon Ltd',  'Principal Eng',     today, 'closed',       today,   'https://www.linkedin.com/jobs/view/567890123', 'Rejected after final round'],
+      ['Zeta Group',   'IC5 Engineer',      today, 'withdrawn',    today,   'https://www.linkedin.com/jobs/view/678901234', 'Withdrew before offer'],
+    ];
+    const csv = LOG_CSV_HEADERS.join(',') + '\n' + samples.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
     const blob = new Blob([csv], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
