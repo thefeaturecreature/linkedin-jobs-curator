@@ -134,6 +134,7 @@
   let jobSort            = { col: 'date', dir: 'desc' };
   let companyFilter      = '';
   let companyFilterOpen  = false;
+  let editingLogIdx      = null;
   let editingRuleId      = null;
   let editingOrigType    = null;
   let collapsedSections  = {
@@ -286,6 +287,8 @@
 #ljf-panel .ljf-jobs-table th.ljf-center,
 #ljf-panel .ljf-jobs-table td.ljf-center { text-align:center; }
 #ljf-panel .ljf-jobs-table tbody tr { border-bottom:1px solid var(--ljf-row-border); }
+#ljf-panel .ljf-jobs-table tbody tr[data-log-idx] { cursor:pointer; }
+#ljf-panel .ljf-jobs-table tbody tr.ljf-row-editing { background:var(--ljf-dismiss-bg) !important;outline:1px solid var(--ljf-tab-accent);outline-offset:-1px; }
 #ljf-panel .ljf-jobs-table td { padding:1px 5px; }
 #ljf-panel .ljf-col-trunc { white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0; }
 #ljf-panel .ljf-col-muted { color:var(--ljf-count-text);white-space:nowrap; }
@@ -568,13 +571,12 @@
 <div id="ljf-add-job-row" class="ljf-add-job-row">
   <input id="ljf-aj-company" class="ljf-add-job-input" type="text" placeholder="Company"  list="ljf-co-list" autocomplete="off" style="flex:0 0 26%;">
   <input id="ljf-aj-title"   class="ljf-add-job-input" type="text" placeholder="Title"    list="ljf-ti-list" autocomplete="off" style="flex:0 0 33%;">
-  <input id="ljf-aj-date"    class="ljf-add-job-input" type="date" value="${today}" style="flex:0 0 12%;">
-  <div style="flex:0 0 7%;"></div>
+  <input id="ljf-aj-date"    class="ljf-add-job-input" type="date" value="${today}" style="flex:0 0 17%;">
   <select id="ljf-aj-status" class="ljf-add-job-sel" style="flex:0 0 12%;">
     ${STATUS_OPTIONS.map(s => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join('')}
   </select>
   <input id="ljf-aj-url" class="ljf-add-job-input" type="url" placeholder="Job URL" autocomplete="off" style="flex:1;min-width:0;">
-  <button id="ljf-aj-add" class="ljf-add-job-submit">Add</button>
+  <button id="ljf-aj-add" class="ljf-add-job-submit">Save</button>
 </div>
 <div id="ljf-jobs-footer" class="ljf-jobs-footer">
   <div class="ljf-footer-stats">
@@ -671,30 +673,65 @@
       });
     });
 
-    // Add job form toggle
-    pane.querySelector('#ljf-footer-add')?.addEventListener('click', () => {
-      const row = pane.querySelector('#ljf-add-job-row');
-      const isOpen = row.classList.toggle('ljf-open');
-      if (isOpen) pane.querySelector('#ljf-aj-company')?.focus();
+    // Row click → populate form for editing
+    pane.querySelectorAll('tbody tr[data-log-idx]').forEach(tr => {
+      tr.addEventListener('click', e => {
+        if (e.target.closest('select, button, a')) return;
+        const idx = +tr.dataset.logIdx;
+        const entry = appliedLog[idx];
+        if (!entry) return;
+        editingLogIdx = idx;
+        const formRow = pane.querySelector('#ljf-add-job-row');
+        formRow.classList.add('ljf-open');
+        pane.querySelector('#ljf-aj-company').value = entry.company || '';
+        pane.querySelector('#ljf-aj-title').value   = entry.title   || '';
+        pane.querySelector('#ljf-aj-date').value    = entry.date    || '';
+        pane.querySelector('#ljf-aj-status').value  = entry.status  || 'applied';
+        pane.querySelector('#ljf-aj-url').value     = entry.url     || '';
+        pane.querySelectorAll('tbody tr[data-log-idx]').forEach(r => r.classList.remove('ljf-row-editing'));
+        tr.classList.add('ljf-row-editing');
+        pane.querySelector('#ljf-aj-company')?.focus();
+      });
     });
 
-    // Add job submit
+    // Add job form toggle — resets to Add mode
+    pane.querySelector('#ljf-footer-add')?.addEventListener('click', () => {
+      const formRow = pane.querySelector('#ljf-add-job-row');
+      const isOpen = formRow.classList.toggle('ljf-open');
+      if (isOpen) {
+        editingLogIdx = null;
+        pane.querySelector('#ljf-aj-company').value = '';
+        pane.querySelector('#ljf-aj-title').value   = '';
+        pane.querySelector('#ljf-aj-date').value    = today;
+        pane.querySelector('#ljf-aj-status').value  = 'applied';
+        pane.querySelector('#ljf-aj-url').value     = '';
+        pane.querySelectorAll('tbody tr[data-log-idx]').forEach(r => r.classList.remove('ljf-row-editing'));
+        pane.querySelector('#ljf-aj-company')?.focus();
+      }
+    });
+
+    // Add / Update submit
     function submitAddJob() {
       const company = pane.querySelector('#ljf-aj-company')?.value.trim();
       const title   = pane.querySelector('#ljf-aj-title')?.value.trim();
       const date    = pane.querySelector('#ljf-aj-date')?.value;
       const status  = pane.querySelector('#ljf-aj-status')?.value || 'applied';
       const url     = pane.querySelector('#ljf-aj-url')?.value.trim();
-      if (!company || !title || !date || !url) return;
-      appliedLog.push({ company, title, date, url, status, statusDate: today });
+      if (!company || !title || !date) return;
+      if (editingLogIdx !== null && appliedLog[editingLogIdx]) {
+        Object.assign(appliedLog[editingLogIdx], { company, title, date, url, status });
+        editingLogIdx = null;
+      } else {
+        appliedLog.push({ company, title, date, url, status, statusDate: today });
+      }
       saveAppliedLog();
       clearHighlights();
       applyAllRules();
       renderJobsPane();
-      // Re-open the form and focus company for quick multi-entry
-      const row = pane.querySelector('#ljf-add-job-row');
-      if (row) {
-        row.classList.add('ljf-open');
+      // Re-open form for quick multi-entry (Add mode)
+      const formRow = pane.querySelector('#ljf-add-job-row');
+      if (formRow) {
+        formRow.classList.add('ljf-open');
         pane.querySelector('#ljf-aj-company')?.focus();
       }
     }
@@ -880,18 +917,18 @@
   function logCompanyMatches(cardCompany, entryCompany) {
     if (!entryCompany || entryCompany.length < 2) return false;
     const escaped = entryCompany.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp('\\b' + escaped + '\\b').test(cardCompany.toLowerCase());
+    return new RegExp('(?<![\\w])' + escaped + '(?![\\w])').test(cardCompany.toLowerCase());
   }
 
   // Returns the first matching log entry if card's company+title match, else null.
   function matchJobLog(card) {
     if (!jobLogEnabled || appliedLog.length === 0) return null;
     const company = cardText(card, COMPANY_SEL).toLowerCase();
-    const title   = cardText(card, TITLE_SEL).toLowerCase();
+    const title   = normalizeSenior(cardText(card, TITLE_SEL)).toLowerCase();
     if (!company && !title) return null;
     return appliedLog.find(e =>
       logCompanyMatches(company, e.company) &&
-      e.title && title.includes(e.title.toLowerCase())
+      e.title && title.includes(normalizeSenior(e.title).toLowerCase())
     ) || null;
   }
 
@@ -902,8 +939,8 @@
     if (!company) return null;
     const companyEntries = appliedLog.filter(e => logCompanyMatches(company, e.company));
     if (companyEntries.length === 0) return null;
-    const title = cardText(card, TITLE_SEL).toLowerCase();
-    const hasTitleMatch = companyEntries.some(e => e.title && title.includes(e.title.toLowerCase()));
+    const title = normalizeSenior(cardText(card, TITLE_SEL)).toLowerCase();
+    const hasTitleMatch = companyEntries.some(e => e.title && title.includes(normalizeSenior(e.title).toLowerCase()));
     if (hasTitleMatch) return null; // full match — handled by matchJobLog
     const dates = companyEntries.map(e => e.date || '').filter(Boolean).sort();
     return dates.length > 0 ? dates[dates.length - 1] : '';
@@ -1245,9 +1282,10 @@
       shownDismiss = dismissMatches.filter(r => r.type !== 'salarybelow');
 
     // Job log — exact match
+    const normTitle = normalizeSenior(title).toLowerCase();
     const logEntry = jobLogEnabled ? (appliedLog.find(e =>
       logCompanyMatches(company.toLowerCase(), e.company) &&
-      e.title && title.toLowerCase().includes(e.title.toLowerCase())
+      e.title && normTitle.includes(normalizeSenior(e.title).toLowerCase())
     ) || null) : null;
 
     // Job log — company-only match
@@ -1366,9 +1404,10 @@
         shownDismiss = dismissMatches.filter(r => r.type !== 'salarybelow');
 
       // Job log — exact match
+      const normTitle = normalizeSenior(title).toLowerCase();
       const logEntry = jobLogEnabled ? (appliedLog.find(e =>
         logCompanyMatches(company.toLowerCase(), e.company) &&
-        e.title && title.toLowerCase().includes(e.title.toLowerCase())
+        e.title && normTitle.includes(normalizeSenior(e.title).toLowerCase())
       ) || null) : null;
 
       // Job log — company-only match
