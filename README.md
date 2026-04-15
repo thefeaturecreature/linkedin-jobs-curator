@@ -5,7 +5,7 @@ A Violentmonkey/Greasemonkey userscript for LinkedIn job search. Rule-based filt
 ## Installation
 
 1. Install [Violentmonkey](https://violentmonkey.github.io/) (recommended), [Tampermonkey](https://www.tampermonkey.net/), or [Greasemonkey](https://addons.mozilla.org/en-US/firefox/addon/greasemonkey/).
-2. Install the script from [Greasy Fork](#) *(link coming soon)* — or click **Raw** on `linkedin-job-filter.js` above and your userscript manager will prompt you to install it.
+2. Install the script from [Greasy Fork](https://greasyfork.org/en/scripts/573971-linkedin-jobs-curator) — or click **Raw** on `linkedin-job-filter.js` above and your userscript manager will prompt you to install it.
 3. Navigate to `linkedin.com/jobs` — the panel appears on the right side of the page.
 
 ## What it does
