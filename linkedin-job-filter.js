@@ -1,4 +1,3 @@
-// noinspection SpellCheckingInspection,JSUnresolvedVariable,DuplicatedCode,JSCheckFunctionSignatures
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
