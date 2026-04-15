@@ -7,8 +7,8 @@
 // @license      GPL-3.0
 // @homepageURL  https://github.com/thefeaturecreature/linkedin-jobs-curator
 // @supportURL   https://github.com/thefeaturecreature/linkedin-jobs-curator/issues
-// @downloadURL  https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/linkedin-job-filter.js
-// @updateURL    https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/linkedin-job-filter.js
+// @downloadURL  https://update.greasyfork.org/scripts/573971/LinkedIn%20Jobs%20Curator.user.js
+// @updateURL    https://update.greasyfork.org/scripts/573971/LinkedIn%20Jobs%20Curator.meta.js
 // @icon         https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/icon.png
 // @match        https://www.linkedin.com/jobs/*
 // @match        https://www.linkedin.com/my-items/*
