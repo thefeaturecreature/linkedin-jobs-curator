@@ -10,6 +10,7 @@
 // @supportURL   https://github.com/thefeaturecreature/linkedin-jobs-curator/issues
 // @downloadURL  https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/linkedin-job-filter.js
 // @updateURL    https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/linkedin-job-filter.js
+// @icon         https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/icon.png
 // @match        https://www.linkedin.com/jobs/*
 // @match        https://www.linkedin.com/my-items/*
 // @grant        GM_setValue
