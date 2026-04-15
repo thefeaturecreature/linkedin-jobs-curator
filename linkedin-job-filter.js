@@ -1456,7 +1456,7 @@
           wasDismissed = true;
         }
       } else if (logCompanyDate !== null) {
-        const days      = daysAgo(logCompanyDate);
+        const days      = daysSince(logCompanyDate);
         const reapplyOk = days !== null && days >= reapplyDays;
         const isRecent  = days !== null && days < reapplyDays;
         const badge = document.createElement('span');
