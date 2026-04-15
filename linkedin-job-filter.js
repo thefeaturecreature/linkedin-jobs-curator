@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.4.2
+// @version      1.4.3
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -3016,63 +3016,75 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
     const menu = document.createElement('div');
     menu.id = 'ljf-hover-menu';
     menu.style.cssText = [
-      'position:fixed', 'z-index:99997',
-      'display:none', 'flex-direction:column', 'align-items:center', 'gap:4px',
-      'background:none', 'border:none', 'padding:0',
+      'position:fixed', 'z-index:2147483647',
+      'display:none', 'flex-direction:row', 'align-items:center', 'gap:2px',
+      'background:#f2f2f2', 'border:1px solid #bbb', 'padding:3px',
+      'border-radius:999px',
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
     ].join(';');
 
-    const topRow = document.createElement('div');
-    topRow.style.cssText = 'display:flex;flex-direction:row;gap:6px;';
+    function makeBtn(char, title, hoverBg, hoverColor) {
+      const btn = document.createElement('button');
+      btn.title       = title;
+      btn.textContent = char;
+      btn.style.cssText = [
+        'width:28px', 'height:28px', 'padding:0', 'border-radius:50%',
+        'cursor:pointer', 'font-size:20px', 'font-weight:400',
+        'line-height:1', 'border:none',
+        'background:transparent', 'color:#555',
+        'display:flex', 'align-items:center', 'justify-content:center',
+        'transition:background 0.1s,color 0.1s',
+      ].join(';');
+      btn.addEventListener('mouseenter', () => { btn.style.background = hoverBg; btn.style.color = hoverColor; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; btn.style.color = '#555'; });
+      return btn;
+    }
 
-    const btnBase = [
-      'width:25px', 'height:25px', 'padding:0', 'border-radius:50%',
-      'cursor:pointer', 'font-size:14px', 'font-weight:700',
-      'line-height:1', 'text-align:center',
-      'box-shadow:0 1px 4px rgba(0,0,0,.35)',
-      'display:flex', 'align-items:center', 'justify-content:center',
-    ].join(';');
+    const qdBtn            = makeBtn('\u00BB', 'Quick dismiss this company', '#d4b896', '#6b3a1f');
+    const dismissPlusBtn   = makeBtn('\u2212', 'Add to dismiss rules',        '#fecaca', '#991b1b');
+    const highlightPlusBtn = makeBtn('+',      'Add to highlight rules',       '#bbf7d0', '#166534');
 
-    const dismissPlusBtn = document.createElement('button');
-    dismissPlusBtn.title = 'Add to dismiss rules';
-    dismissPlusBtn.textContent = '+';
-    dismissPlusBtn.style.cssText = btnBase + ';background:#991b1b;color:#fff;border:none;';
-
-    const highlightPlusBtn = document.createElement('button');
-    highlightPlusBtn.title = 'Add to highlight rules';
-    highlightPlusBtn.textContent = '+';
-    highlightPlusBtn.style.cssText = btnBase + ';background:#166534;color:#fff;border:none;';
-
-    const qdBtn = document.createElement('button');
-    qdBtn.title = 'Quick dismiss this company';
-    qdBtn.textContent = '\u00BB';
-    qdBtn.style.cssText = btnBase + ';background:#854d0e;color:#fff;border:none;font-size:11px;';
-
-    topRow.appendChild(dismissPlusBtn);
-    topRow.appendChild(highlightPlusBtn);
-    menu.appendChild(topRow);
+    menu.appendChild(highlightPlusBtn);
+    menu.appendChild(dismissPlusBtn);
     menu.appendChild(qdBtn);
     document.body.appendChild(menu);
 
     let currentCard = null;
     let hideTimeout = null;
+    let showTimeout = null;
 
-    function showMenu(btn) {
+    function showMenu(triggerBtn) {
       clearTimeout(hideTimeout);
-      const card = btn.closest(CARD_SEL);
+      const card = triggerBtn.closest(CARD_SEL);
       if (!card) return;
       currentCard = card;
       qdBtn.style.display = dismissActionsEnabled ? 'flex' : 'none';
+      menu.style.visibility = 'hidden';
       menu.style.display = 'flex';
       requestAnimationFrame(() => {
-        const rect = btn.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        menu.style.top  = (rect.bottom + 4) + 'px';
-        menu.style.left = (centerX - menu.offsetWidth / 2) + 'px';
+        const rect = triggerBtn.getBoundingClientRect();
+        const size = Math.round(rect.height);
+        [qdBtn, dismissPlusBtn, highlightPlusBtn].forEach(b => {
+          b.style.width = b.style.height = size + 'px';
+        });
+        menu.style.top  = rect.top + 'px';
+        menu.style.left = (rect.left - menu.offsetWidth) + 'px';
+        menu.style.visibility = 'visible';
       });
     }
 
+    function scheduleShow(triggerBtn) {
+      clearTimeout(showTimeout);
+      clearTimeout(hideTimeout);
+      showTimeout = setTimeout(() => showMenu(triggerBtn), 500);
+    }
+
+    function cancelShow() {
+      clearTimeout(showTimeout);
+    }
+
     function scheduleHide() {
+      cancelShow();
       hideTimeout = setTimeout(() => {
         menu.style.display = 'none';
         currentCard = null;
@@ -3084,7 +3096,7 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
     document.addEventListener('mouseover', e => {
       if (!hoverMenuEnabled) return;
       const btn = e.target.closest(HOVER_SEL);
-      if (btn) showMenu(btn);
+      if (btn) scheduleShow(btn);
     });
 
     document.addEventListener('mouseout', e => {
@@ -3095,6 +3107,7 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
     menu.addEventListener('mouseleave', scheduleHide);
 
     document.addEventListener('scroll', () => {
+      cancelShow();
       menu.style.display = 'none';
       currentCard = null;
     }, { passive: true, capture: true });
