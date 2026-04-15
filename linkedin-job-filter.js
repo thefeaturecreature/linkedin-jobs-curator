@@ -1,9 +1,15 @@
 // noinspection SpellCheckingInspection,JSUnresolvedVariable,DuplicatedCode,JSCheckFunctionSignatures
 // ==UserScript==
-// @name         LinkedIn Job Filter
-// @namespace    Monkey Scripts
-// @version      1.3.3
-// @description  DOM-only job card filtering with rule manager overlay
+// @name         LinkedIn Jobs Curator
+// @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
+// @version      1.4.0
+// @author       Evan Dierlam
+// @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
+// @license      GPL-3.0
+// @homepageURL  https://github.com/thefeaturecreature/linkedin-jobs-curator
+// @supportURL   https://github.com/thefeaturecreature/linkedin-jobs-curator/issues
+// @downloadURL  https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/linkedin-job-filter.js
+// @updateURL    https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/linkedin-job-filter.js
 // @match        https://www.linkedin.com/jobs/*
 // @match        https://www.linkedin.com/my-items/*
 // @grant        GM_setValue
@@ -18,7 +24,7 @@
 
   const STORAGE_KEY    = 'ljf_rules';
   const LOG_KEY        = 'ljf_applied_log';
-  const SOURCE_URL     = '';
+  const SOURCE_URL     = 'https://github.com/thefeaturecreature/linkedin-jobs-curator';
 
   const CARD_SEL    = 'li.jobs-search-results__list-item, li.scaffold-layout__list-item';
   const TITLE_SEL   = '.job-card-list__title--link, .job-card-container__link';
