@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.4.1
+// @version      1.4.2
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -153,6 +153,7 @@
   };
   let darkMode           = GM_getValue('ljf_darkMode', 'dark') !== 'light';
   let hoverMenuEnabled   = GM_getValue('ljf_hoverMenu', 'true') !== 'false';
+  let reapplyDays        = Math.max(1, parseInt(GM_getValue('ljf_reapplyDays', '14'), 10) || 14);
 
   function t() { return darkMode ? THEMES.dark : THEMES.light; }
 
@@ -1089,8 +1090,8 @@
     if (isDismissed(card)) return;
     if (card.dataset.ljfJobLogLabel) return; // already labeled
     const days = daysSince(date);
-    const reapplyOk = days !== null && days >= 14;
-    const isRecent  = days !== null && days < 14;
+    const reapplyOk = days !== null && days >= reapplyDays;
+    const isRecent  = days !== null && days < reapplyDays;
 
     const n = card.querySelectorAll('.ljf-badge').length;
     const badge = document.createElement('span');
@@ -1337,8 +1338,8 @@
     } else if (logCompanyDate !== null) {
       // Company-only badge (mirrors actJobLogCompanyLabel)
       const days = daysSince(logCompanyDate);
-      const reapplyOk = days !== null && days >= 14;
-      const isRecent  = days !== null && days < 14;
+      const reapplyOk = days !== null && days >= reapplyDays;
+      const isRecent  = days !== null && days < reapplyDays;
       const badge = document.createElement('span');
       badge.className = 'ljf-badge';
       const bCount = hero.querySelectorAll('.ljf-badge').length;
@@ -1455,9 +1456,9 @@
           wasDismissed = true;
         }
       } else if (logCompanyDate !== null) {
-        const days      = daysAgo(logCompanyDate);
-        const reapplyOk = days !== null && days >= 14;
-        const isRecent  = days !== null && days < 14;
+        const days      = daysSince(logCompanyDate);
+        const reapplyOk = days !== null && days >= reapplyDays;
+        const isRecent  = days !== null && days < reapplyDays;
         const badge = document.createElement('span');
         badge.className = 'ljf-badge';
         const bCount = card.querySelectorAll('.ljf-badge').length;
@@ -2178,6 +2179,28 @@
           GM_setValue('ljf_hoverMenu', checked ? 'true' : 'false');
         })));
         content.appendChild(divider());
+        (() => {
+          const inp = document.createElement('input');
+          inp.type  = 'number';
+          inp.min   = '1';
+          inp.max   = '365';
+          inp.value = String(reapplyDays);
+          inp.style.cssText = [
+            'width:52px', 'text-align:center', 'border-radius:4px',
+            `border:1px solid ${th.rowBorder}`, `background:${th.rowBg}`,
+            `color:${th.panelText}`, 'font-size:12px', 'padding:3px 6px',
+          ].join(';');
+          inp.addEventListener('change', () => {
+            const v = Math.max(1, parseInt(inp.value, 10) || 14);
+            inp.value   = String(v);
+            reapplyDays = v;
+            GM_setValue('ljf_reapplyDays', String(v));
+            clearHighlights();
+            applyAllRules();
+          });
+          content.appendChild(mkRow('Reapply after (days)', inp));
+        })();
+        content.appendChild(divider());
         content.appendChild(mkRow('Dismiss Actions', mkToggle(dismissActionsEnabled, checked => {
           if (checked && !dismissActionsEnabled) {
             overlay.remove();
@@ -2344,6 +2367,7 @@
       exported:      new Date().toISOString(),
       darkMode:      darkMode ? 'dark' : 'light',
       jobLogEnabled: jobLogEnabled,
+      reapplyDays:   reapplyDays,
       rules:         rules,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -2371,7 +2395,7 @@
             setStatus('\u26A0 No rules found in file.');
             return;
           }
-          showImportDialog(data.rules, data.darkMode, data.jobLogEnabled);
+          showImportDialog(data.rules, data.darkMode, data.jobLogEnabled, data.reapplyDays);
         } catch {
           setStatus('\u26A0 Failed to parse rules file.');
         }
@@ -2399,7 +2423,7 @@
     });
   }
 
-  function showImportDialog(incoming, importedDarkMode, importedJobLogEnabled) {
+  function showImportDialog(incoming, importedDarkMode, importedJobLogEnabled, importedReapplyDays) {
     const th = t();
     const overlay = document.createElement('div');
     overlay.style.cssText = [
@@ -2454,6 +2478,10 @@
       if (importedJobLogEnabled === true || importedJobLogEnabled === false) {
         jobLogEnabled = importedJobLogEnabled;
         GM_setValue('ljf_jobLogEnabled', jobLogEnabled ? 'true' : 'false');
+      }
+      if (typeof importedReapplyDays === 'number' && importedReapplyDays >= 1) {
+        reapplyDays = importedReapplyDays;
+        GM_setValue('ljf_reapplyDays', String(reapplyDays));
       }
     };
 
