@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.4.3
+// @version      1.4.5
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -26,12 +26,12 @@
   const LOG_KEY        = 'ljf_applied_log';
   const SOURCE_URL     = 'https://github.com/thefeaturecreature/linkedin-jobs-curator';
 
-  const CARD_SEL    = 'li.jobs-search-results__list-item, li.scaffold-layout__list-item';
-  const TITLE_SEL   = '.job-card-list__title--link, .job-card-container__link';
-  const COMPANY_SEL = '.artdeco-entity-lockup__subtitle span';
+  const CARD_SEL    = 'li.jobs-search-results__list-item, li.scaffold-layout__list-item, li.discovery-templates-entity-item, a[componentkey]:has(div[data-display-contents] > p[style])';
+  const TITLE_SEL   = '.job-card-list__title--link, .job-card-container__link, div[data-display-contents] > p[style] > span[aria-hidden="true"]';
+  const COMPANY_SEL = '.artdeco-entity-lockup__subtitle span, div[data-display-contents] + div > p:first-child';
   const SALARY_SEL  = '.job-card-container__metadata-item, .job-card-container__metadata-wrapper li span';
   const APPLIED_SEL = '.job-card-container__footer-job-state';
-  const DISMISS_SEL = 'button.job-card-container__action';
+  const DISMISS_SEL = 'button.job-card-container__action, button[aria-label^="Dismiss "][aria-label$=" job"]';
   const UNDO_SEL    = 'button.artdeco-button--circle';   // undo/restore button shown after dismiss
 
   // Saved-jobs page (/my-items/saved-jobs/)
@@ -989,7 +989,19 @@
   // Returns the number of rules that matched.
   function applyCardRules(card) {
     if (isDismissed(card)) { markDismissed(card); return 0; }
-    if (card.dataset.ljfRulesApplied) return 0; // already processed this scan
+    if (card.dataset.ljfRulesApplied) {
+      // Re-enforce color in case the SPA re-rendered and cleared inline styles.
+      if (card.dataset.ljfHighlighted) {
+        card.style.setProperty('background-color', CC.dismissBg, 'important');
+        card.style.setProperty('border-left', '3px solid ' + CC.dismissBorder, 'important');
+        card.style.setProperty('box-sizing', 'border-box', 'important');
+      } else if (card.dataset.ljfGreenMatch) {
+        card.style.setProperty('background-color', CC.highlightBg, 'important');
+        card.style.setProperty('border-left', '3px solid ' + CC.highlightBorder, 'important');
+        card.style.setProperty('box-sizing', 'border-box', 'important');
+      }
+      return 0;
+    }
 
     const dismissMatches   = [];
     const highlightMatches = [];
@@ -1032,6 +1044,11 @@
 
     card.style.position = 'relative';
 
+    // Add badges first — their DOM mutation may trigger a LinkedIn SPA re-render
+    // that clears inline styles, so we set background-color after.
+    for (const rule of shownDismiss)   addBadge(card, '\u26F3 ' + rule.label, CC.dismissBadge);
+    for (const rule of shownHighlight) addBadge(card, '\u2605 ' + rule.label, CC.highlightBadge);
+
     // Card color: dismiss (red) beats highlight (green).
     if (shownDismiss.length) {
       card.style.setProperty('background-color', CC.dismissBg, 'important');
@@ -1046,10 +1063,6 @@
       clearInnerBorder(card);
       card.dataset.ljfGreenMatch = shownHighlight[0].id;
     }
-
-    // Stacked badges: dismiss at the bottom, highlight labels above.
-    for (const rule of shownDismiss)   addBadge(card, '\u26F3 ' + rule.label, CC.dismissBadge);
-    for (const rule of shownHighlight) addBadge(card, '\u2605 ' + rule.label, CC.highlightBadge);
 
     card.dataset.ljfRulesApplied = '1';
     return dismissMatches.length + highlightMatches.length;
