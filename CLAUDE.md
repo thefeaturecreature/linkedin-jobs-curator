@@ -46,6 +46,7 @@ These are the first thing to check when LinkedIn ships a layout change.
 | `ljf_reapplyDays` | `'14'` | Reapply window threshold |
 | `ljf_activePanel` | `'rules'` | Last active panel tab |
 | `ljf_onboarded` | `'false'` | Onboarding modal shown |
+| `ljf_quickDismissMode` | `'company'` | Quick dismiss mode (`company`, `title`, `location`) |
 
 ## Functions reference
 

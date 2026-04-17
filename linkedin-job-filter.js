@@ -154,6 +154,7 @@
   let darkMode           = GM_getValue('ljf_darkMode', 'dark') !== 'light';
   let hoverMenuEnabled   = GM_getValue('ljf_hoverMenu', 'true') !== 'false';
   let reapplyDays        = Math.max(1, parseInt(GM_getValue('ljf_reapplyDays', '14'), 10) || 14);
+  let quickDismissMode   = GM_getValue('ljf_quickDismissMode', 'company');
 
   function t() { return darkMode ? THEMES.dark : THEMES.light; }
 
@@ -1217,6 +1218,25 @@
     return dismissed;
   }
 
+  function quickDismissByMetadata(keyword) {
+    const re = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    let dismissed = 0;
+    for (const card of getCards()) {
+      if (isDismissed(card)) continue;
+      const hit = Array.from(card.querySelectorAll(SALARY_SEL)).some(el => re.test(el.textContent));
+      if (!hit) continue;
+      const btn = card.querySelector(DISMISS_SEL);
+      if (btn) {
+        card.dataset.ljfDismissed = '1';
+        btn.click();
+        markDismissed(card);
+        dismissed++;
+        updateTabCount();
+      }
+    }
+    return dismissed;
+  }
+
   // ─── View page hero highlighting ─────────────────────────────────────────────
 
   function getViewHero() {
@@ -1735,9 +1755,9 @@
 
   ${dismissActionsEnabled ? `
   <div class="ljf-quick-bar">
-    <div class="ljf-form-label">Quick Dismiss</div>
+    <div class="ljf-form-label ljf-qdmode-label" id="ljf-qdmode-label" title="Click to cycle mode" style="cursor:pointer;user-select:none">Quick Dismiss (<span id="ljf-qdmode-text">${{ company: 'Company', title: 'Title Keywords', location: 'Location Keywords' }[quickDismissMode]}</span>)</div>
     <div class="ljf-quick-row">
-      <input id="ljf-quick-company" type="text" class="ljf-quick-input" placeholder="Company name"/>
+      <input id="ljf-quick-value" type="text" class="ljf-quick-input" placeholder="${{ company: 'Company name', title: 'Title keyword', location: 'Location keyword' }[quickDismissMode]}"/>
       <button id="ljf-quick-dismiss" class="ljf-quick-btn">Dismiss</button>
     </div>
   </div>` : ''}
@@ -1757,15 +1777,33 @@
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
     });
 
+    const QD_MODE_LABELS = { company: 'Company', title: 'Title Keywords', location: 'Location Keywords' };
+    const QD_PLACEHOLDERS = { company: 'Company name', title: 'Title keyword', location: 'Location keyword' };
+
+    document.getElementById('ljf-qdmode-label')?.addEventListener('click', () => {
+      const modes = ['company', 'title', 'location'];
+      quickDismissMode = modes[(modes.indexOf(quickDismissMode) + 1) % modes.length];
+      GM_setValue('ljf_quickDismissMode', quickDismissMode);
+      document.getElementById('ljf-qdmode-text').textContent = QD_MODE_LABELS[quickDismissMode];
+      document.getElementById('ljf-quick-value').placeholder = QD_PLACEHOLDERS[quickDismissMode];
+    });
+
     document.getElementById('ljf-quick-dismiss')?.addEventListener('click', () => {
-      const company = document.getElementById('ljf-quick-company').value.trim();
-      if (!company) { setStatus('\u26A0 Enter a company name.'); return; }
-      const dismissed = dismissRule({ type: 'companydismiss', value: company, label: 'Quick: ' + company });
-      document.getElementById('ljf-quick-company').value = '';
+      const value = document.getElementById('ljf-quick-value').value.trim();
+      if (!value) { setStatus('\u26A0 Enter a value.'); return; }
+      let dismissed = 0;
+      if (quickDismissMode === 'company') {
+        dismissed = dismissRule({ type: 'companydismiss', value, label: 'Quick: ' + value });
+      } else if (quickDismissMode === 'title') {
+        dismissed = dismissRule({ type: 'titledismiss', value, label: 'Quick: ' + value });
+      } else {
+        dismissed = quickDismissByMetadata(value);
+      }
+      document.getElementById('ljf-quick-value').value = '';
       setStatus('Quick dismiss: ' + dismissed + ' card(s) dismissed.');
     });
 
-    document.getElementById('ljf-quick-company')?.addEventListener('keydown', e => {
+    document.getElementById('ljf-quick-value')?.addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('ljf-quick-dismiss').click();
     });
 
