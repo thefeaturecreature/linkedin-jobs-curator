@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.4.6
+// @version      1.4.7
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -2457,13 +2457,21 @@
       reader.addEventListener('load', () => {
         try {
           const data = JSON.parse(reader.result);
-          if (!Array.isArray(data.rules) || data.rules.length === 0) {
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            setStatus('\u26A0 Invalid rules file: expected an object with a "rules" array.');
+            return;
+          }
+          if (!Array.isArray(data.rules)) {
+            setStatus('\u26A0 Invalid rules file: no "rules" array found.');
+            return;
+          }
+          if (data.rules.length === 0) {
             setStatus('\u26A0 No rules found in file.');
             return;
           }
           showImportDialog(data.rules, data.darkMode, data.jobLogEnabled, data.reapplyDays);
-        } catch {
-          setStatus('\u26A0 Failed to parse rules file.');
+        } catch (e) {
+          setStatus('\u26A0 Invalid rules file: ' + e.message);
         }
       });
       reader.readAsText(file);
@@ -2608,13 +2616,17 @@
           const data = JSON.parse(reader.result);
           // Accept { appliedLog: [...] } or a bare array
           const incoming = Array.isArray(data) ? data : (Array.isArray(data.appliedLog) ? data.appliedLog : null);
-          if (!incoming || incoming.length === 0) {
+          if (incoming === null) {
+            setStatus('\u26A0 Invalid log file: expected an array or an object with an "appliedLog" array.');
+            return;
+          }
+          if (incoming.length === 0) {
             setStatus('\u26A0 No log entries found in file.');
             return;
           }
           showLogImportDialog(incoming);
-        } catch {
-          setStatus('\u26A0 Failed to parse log file.');
+        } catch (e) {
+          setStatus('\u26A0 Invalid log file: ' + e.message);
         }
       });
       reader.readAsText(file);
