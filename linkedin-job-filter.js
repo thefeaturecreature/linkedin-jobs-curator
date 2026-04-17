@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.4.5
+// @version      1.4.6
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -133,6 +133,7 @@
 
   let rules              = loadRules();
   let appliedLog         = loadAppliedLog();
+  let logIndex           = buildLogIndex();
   let jobLogEnabled         = GM_getValue('ljf_jobLogEnabled', 'true') !== 'false';
   let dismissActionsEnabled = GM_getValue('ljf_dismissActions', 'false') === 'true';
   let panelOpen          = false;
@@ -768,6 +769,20 @@
 
   function saveAppliedLog() {
     GM_setValue(LOG_KEY, JSON.stringify(appliedLog));
+    logIndex = buildLogIndex();
+  }
+
+  function buildLogIndex() {
+    const idx = new Map();
+    for (const e of appliedLog) {
+      if (!e.company || e.company.length < 2) continue;
+      const key = e.company.toLowerCase();
+      if (!idx.has(key)) {
+        const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        idx.set(key, new RegExp('(?<![\\w])' + esc + '(?![\\w])'));
+      }
+    }
+    return idx;
   }
 
   function addRule(type, value, label) {
@@ -924,8 +939,8 @@
   // Word-boundary company match: "Flex" won't match "Flexible", "Ro" won't match "ProKatchers", etc.
   function logCompanyMatches(cardCompany, entryCompany) {
     if (!entryCompany || entryCompany.length < 2) return false;
-    const escaped = entryCompany.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp('(?<![\\w])' + escaped + '(?![\\w])').test(cardCompany.toLowerCase());
+    const rx = logIndex.get(entryCompany.toLowerCase());
+    return rx ? rx.test(cardCompany.toLowerCase()) : false;
   }
 
   // Returns the first matching log entry if card's company+title match, else null.
