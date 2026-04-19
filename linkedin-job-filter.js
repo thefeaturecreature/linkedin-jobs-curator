@@ -29,7 +29,7 @@
   const CARD_SEL    = 'li.jobs-search-results__list-item, li.scaffold-layout__list-item, li.discovery-templates-entity-item, a[componentkey]:has(div[data-display-contents] > p[style])';
   const TITLE_SEL   = '.job-card-list__title--link, .job-card-container__link, div[data-display-contents] > p[style] > span[aria-hidden="true"]';
   const COMPANY_SEL = '.artdeco-entity-lockup__subtitle span, div[data-display-contents] + div > p:first-child';
-  const SALARY_SEL  = '.job-card-container__metadata-item, .job-card-container__metadata-wrapper li span';
+  const SALARY_SEL  = '.job-card-container__metadata-item, .job-card-container__metadata-wrapper li span, div[data-display-contents] + div > p';
   const APPLIED_SEL = '.job-card-container__footer-job-state';
   const DISMISS_SEL = 'button.job-card-container__action, button[aria-label^="Dismiss "][aria-label$=" job"]';
   const UNDO_SEL    = 'button.artdeco-button--circle';   // undo/restore button shown after dismiss
