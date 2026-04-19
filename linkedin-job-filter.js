@@ -42,19 +42,21 @@
   // Rule type definitions
   // applied / salarybelow / topsalarybelow are rendered as permanent sticky blocks, not listed in dropdown
   const RULE_TYPES = {
-    applied:        { label: 'Already Applied',        match: matchApplied        },
-    topsalarybelow: { label: 'Top Salary Below ($k)',   match: matchTopSalary      },
-    salarybelow:    { label: 'Salary Below ($k)',        match: matchSalary         },
-    companydismiss: { label: 'Company to Dismiss',      match: matchCompany         },
-    titledismiss:   { label: 'Title to Dismiss',        match: matchTitle           },
-    companyhi:      { label: 'Company to Highlight',    match: matchCompanyHi,  highlight: true },
-    titlehi:        { label: 'Title to Highlight',      match: matchTitleHi,    highlight: true },
-    topsalaryabove: { label: 'Top Salary Above ($k)',   match: matchTopSalaryAbove, highlight: true },
-    salaryabove:    { label: 'Salary Above ($k)',        match: matchSalaryAbove,    highlight: true },
+    applied:          { label: 'Already Applied',          match: matchApplied          },
+    topsalarybelow:   { label: 'Top Salary Below ($k)',     match: matchTopSalary        },
+    salarybelow:      { label: 'Salary Below ($k)',          match: matchSalary           },
+    companydismiss:   { label: 'Company to Dismiss',        match: matchCompany           },
+    titledismiss:     { label: 'Title to Dismiss',          match: matchTitle             },
+    locationdismiss:  { label: 'Location to Dismiss',       match: matchLocation          },
+    companyhi:        { label: 'Company to Highlight',      match: matchCompanyHi,    highlight: true },
+    titlehi:          { label: 'Title to Highlight',        match: matchTitleHi,      highlight: true },
+    locationhi:       { label: 'Location to Highlight',     match: matchLocationHi,   highlight: true },
+    topsalaryabove:   { label: 'Top Salary Above ($k)',     match: matchTopSalaryAbove,  highlight: true },
+    salaryabove:      { label: 'Salary Above ($k)',          match: matchSalaryAbove,     highlight: true },
   };
 
   // Types shown in the add-rule dropdown (salary types conditionally disabled)
-  const DROPDOWN_TYPES = ['companydismiss', 'titledismiss', 'topsalarybelow', 'salarybelow', 'companyhi', 'titlehi', 'topsalaryabove', 'salaryabove'];
+  const DROPDOWN_TYPES = ['companydismiss', 'titledismiss', 'locationdismiss', 'topsalarybelow', 'salarybelow', 'companyhi', 'titlehi', 'locationhi', 'topsalaryabove', 'salaryabove'];
 
   // ─── Semantic card-overlay colors ─────────────────────────────────────────────
   // Applied as transparent RGBA over LinkedIn's own card backgrounds.
@@ -148,9 +150,11 @@
     dismissSection:   false,
     companydismiss:   false,
     titledismiss:     false,
+    locationdismiss:  false,
     highlightSection: false,
     companyhi:        false,
     titlehi:          false,
+    locationhi:       false,
   };
   let darkMode           = GM_getValue('ljf_darkMode', 'dark') !== 'light';
   let hoverMenuEnabled   = GM_getValue('ljf_hoverMenu', 'true') !== 'false';
@@ -845,6 +849,15 @@
     return matchTitle(card, rule);
   }
 
+  function matchLocation(card, rule) {
+    const kw = rule.value.toLowerCase();
+    return Array.from(card.querySelectorAll(SALARY_SEL)).some(el => el.textContent.trim().toLowerCase().includes(kw));
+  }
+
+  function matchLocationHi(card, rule) {
+    return matchLocation(card, rule);
+  }
+
   function matchSalaryAbove(card, rule) {
     const threshold = parseFloat(rule.value) * 1000;
     if (isNaN(threshold)) return false;
@@ -1228,25 +1241,6 @@
           dismissed++;
           updateTabCount();
         }
-      }
-    }
-    return dismissed;
-  }
-
-  function quickDismissByMetadata(keyword) {
-    const re = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    let dismissed = 0;
-    for (const card of getCards()) {
-      if (isDismissed(card)) continue;
-      const hit = Array.from(card.querySelectorAll(SALARY_SEL)).some(el => re.test(el.textContent));
-      if (!hit) continue;
-      const btn = card.querySelector(DISMISS_SEL);
-      if (btn) {
-        card.dataset.ljfDismissed = '1';
-        btn.click();
-        markDismissed(card);
-        dismissed++;
-        updateTabCount();
       }
     }
     return dismissed;
@@ -1812,7 +1806,7 @@
       } else if (quickDismissMode === 'title') {
         dismissed = dismissRule({ type: 'titledismiss', value, label: 'Quick: ' + value });
       } else {
-        dismissed = quickDismissByMetadata(value);
+        dismissed = dismissRule({ type: 'locationdismiss', value, label: 'Quick: ' + value });
       }
       document.getElementById('ljf-quick-value').value = '';
       setStatus('Quick dismiss: ' + dismissed + ' card(s) dismissed.');
@@ -2816,14 +2810,16 @@
     if (!list) return;
     list.innerHTML = '';
 
-    const companyDismiss = rules.filter(r => r.type === 'companydismiss');
-    const titleDismiss   = rules.filter(r => r.type === 'titledismiss');
-    const companyHi      = rules.filter(r => r.type === 'companyhi');
-    const titleHi        = rules.filter(r => r.type === 'titlehi');
+    const companyDismiss   = rules.filter(r => r.type === 'companydismiss');
+    const titleDismiss     = rules.filter(r => r.type === 'titledismiss');
+    const locationDismiss  = rules.filter(r => r.type === 'locationdismiss');
+    const companyHi        = rules.filter(r => r.type === 'companyhi');
+    const titleHi          = rules.filter(r => r.type === 'titlehi');
+    const locationHi       = rules.filter(r => r.type === 'locationhi');
 
     // ── Dismiss Rules ─────────────────────────────────────────────────────────
     const dCollapsed = collapsedSections.dismissSection;
-    list.appendChild(renderSectionHeader('Dismiss Rules', 'dismissSection', ['companydismiss', 'titledismiss']));
+    list.appendChild(renderSectionHeader('Dismiss Rules', 'dismissSection', ['companydismiss', 'titledismiss', 'locationdismiss']));
     if (!dCollapsed) {
       list.appendChild(renderAppliedBlock(rules.find(r => r.type === 'applied')));
       list.appendChild(renderJobLogBlock());
@@ -2838,6 +2834,10 @@
     if (!collapsedSections.titledismiss) {
       for (const rule of titleDismiss) list.appendChild(renderRuleRow(rule));
     }
+    list.appendChild(renderGroupHeader('Location Keywords', locationDismiss.length, 'locationdismiss'));
+    if (!collapsedSections.locationdismiss) {
+      for (const rule of locationDismiss) list.appendChild(renderRuleRow(rule));
+    }
 
     // ── Divider ───────────────────────────────────────────────────────────────
     const divider = document.createElement('div');
@@ -2846,7 +2846,7 @@
 
     // ── Highlight Rules ───────────────────────────────────────────────────────
     const hCollapsed = collapsedSections.highlightSection;
-    list.appendChild(renderSectionHeader('Highlight Rules', 'highlightSection', ['companyhi', 'titlehi']));
+    list.appendChild(renderSectionHeader('Highlight Rules', 'highlightSection', ['companyhi', 'titlehi', 'locationhi']));
     if (!hCollapsed) {
       list.appendChild(renderSalaryBlock('topsalaryabove', rules.find(r => r.type === 'topsalaryabove'), true));
       list.appendChild(renderSalaryBlock('salaryabove',    rules.find(r => r.type === 'salaryabove'),    true));
@@ -2858,6 +2858,10 @@
     list.appendChild(renderGroupHeader('Title Keywords', titleHi.length, 'titlehi'));
     if (!collapsedSections.titlehi) {
       for (const rule of titleHi) list.appendChild(renderRuleRow(rule));
+    }
+    list.appendChild(renderGroupHeader('Location Keywords', locationHi.length, 'locationhi'));
+    if (!collapsedSections.locationhi) {
+      for (const rule of locationHi) list.appendChild(renderRuleRow(rule));
     }
 
     updateDropdownBlockedOptions();
