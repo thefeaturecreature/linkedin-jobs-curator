@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.4.8
+// @version      1.4.9
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -1111,7 +1111,9 @@
 
   function applyRecentlyAppliedVisibility() {
     for (const card of getCards()) {
-      if (card.dataset.ljfJobLog && card.dataset.ljfJobLogLabel) {
+      const isYellow    = card.dataset.ljfJobLog && card.dataset.ljfJobLogLabel;
+      const isDismissed = !!card.dataset.ljfDismissed;
+      if (isYellow || isDismissed) {
         card.style.display = hideRecentlyApplied ? 'none' : '';
       }
     }
@@ -1217,6 +1219,7 @@
     card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
     card.style.position = 'relative';
     addBadge(card, '\u2716 dismissed', CC.dismissedBadge);
+    if (hideRecentlyApplied) card.style.display = 'none';
   }
 
   function dismissJobLog() {
@@ -1587,7 +1590,7 @@
     const yellowCountEl = document.getElementById('ljf-tab-count-yellow');
     const eyeBtn        = document.getElementById('ljf-tab-hide-recent');
     if (yellowPill && yellowCountEl) {
-      const n = cards.filter(c => c.dataset.ljfJobLog && c.dataset.ljfJobLogLabel && !isDismissed(c)).length;
+      const n = cards.filter(c => (c.dataset.ljfJobLog && c.dataset.ljfJobLogLabel) || c.dataset.ljfDismissed).length;
       if (n > 0) {
         yellowCountEl.textContent = n;
         yellowPill.style.display = 'flex';
