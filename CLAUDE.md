@@ -47,6 +47,7 @@ These are the first thing to check when LinkedIn ships a layout change.
 | `ljf_activePanel` | `'rules'` | Last active panel tab |
 | `ljf_onboarded` | `'false'` | Onboarding modal shown |
 | `ljf_quickDismissMode` | `'company'` | Quick dismiss mode (`company`, `title`, `location`) |
+| `ljf_hideRecentlyApplied` | `'false'` | Hide yellow (recently applied company) cards |
 
 ## Functions reference
 

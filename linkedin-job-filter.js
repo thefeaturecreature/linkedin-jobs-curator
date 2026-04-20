@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.4.7
+// @version      1.4.8
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -158,8 +158,9 @@
   };
   let darkMode           = GM_getValue('ljf_darkMode', 'dark') !== 'light';
   let hoverMenuEnabled   = GM_getValue('ljf_hoverMenu', 'true') !== 'false';
-  let reapplyDays        = Math.max(1, parseInt(GM_getValue('ljf_reapplyDays', '14'), 10) || 14);
-  let quickDismissMode   = GM_getValue('ljf_quickDismissMode', 'company');
+  let reapplyDays           = Math.max(1, parseInt(GM_getValue('ljf_reapplyDays', '14'), 10) || 14);
+  let quickDismissMode      = GM_getValue('ljf_quickDismissMode', 'company');
+  let hideRecentlyApplied   = GM_getValue('ljf_hideRecentlyApplied', 'false') !== 'false';
 
   function t() { return darkMode ? THEMES.dark : THEMES.light; }
 
@@ -1101,10 +1102,19 @@
     let total = 0;
     for (const card of getCards()) total += applyCardRules(card);
     applyJobLog();
+    applyRecentlyAppliedVisibility();
     applyViewHeroRules();
     applySavedJobRules();
     updateTabCount();
     return total;
+  }
+
+  function applyRecentlyAppliedVisibility() {
+    for (const card of getCards()) {
+      if (card.dataset.ljfJobLog && card.dataset.ljfJobLogLabel) {
+        card.style.display = hideRecentlyApplied ? 'none' : '';
+      }
+    }
   }
 
   function applyJobLog() {
@@ -1572,6 +1582,20 @@
       greenEl.textContent = n > 0 ? n : '';
       greenEl.style.display = n > 0 ? 'flex' : 'none';
     }
+
+    const yellowPill    = document.getElementById('ljf-tab-yellow-pill');
+    const yellowCountEl = document.getElementById('ljf-tab-count-yellow');
+    const eyeBtn        = document.getElementById('ljf-tab-hide-recent');
+    if (yellowPill && yellowCountEl) {
+      const n = cards.filter(c => c.dataset.ljfJobLog && c.dataset.ljfJobLogLabel && !isDismissed(c)).length;
+      if (n > 0) {
+        yellowCountEl.textContent = n;
+        yellowPill.style.display = 'flex';
+        if (eyeBtn) eyeBtn.textContent = hideRecentlyApplied ? '\u25cb' : '\u25cf';
+      } else {
+        yellowPill.style.display = 'none';
+      }
+    }
   }
 
   function clearHighlights() {
@@ -1579,6 +1603,7 @@
       card.style.removeProperty('background-color');
       card.style.removeProperty('border-left');
       card.style.removeProperty('box-sizing');
+      card.style.removeProperty('display');
       delete card.dataset.ljfHighlighted;
       delete card.dataset.ljfDismissed;
       delete card.dataset.ljfGreenMatch;
@@ -1663,7 +1688,20 @@
         'background:#1a8c1a;color:#fff;border-radius:50%;' +
         'width:20px;height:20px;min-width:20px;' +
         'font-size:10px;font-weight:700;line-height:1;' +
-      '"></span>';
+      '"></span>' +
+      '<div id="ljf-tab-yellow-pill" title="Recently applied companies" style="' +
+        'display:none;flex-direction:column;align-items:center;justify-content:center;' +
+        'background:#8a7000;color:#fff;gap:3px;cursor:default;' +
+        'border-radius:10px;padding:4px 1px 2px 1px;width:20px;box-sizing:border-box;' +
+      '">' +
+        '<span id="ljf-tab-count-yellow" style="font-size:10px;font-weight:700;line-height:1;"></span>' +
+        '<button id="ljf-tab-hide-recent" title="Toggle recently applied visibility" style="' +
+          'background:#f5e07a !important;border:none !important;border-radius:50% !important;' +
+          'width:16px !important;height:16px !important;min-width:16px !important;max-width:16px !important;color:#5a4800 !important;cursor:pointer;' +
+          'font-size:9px !important;font-weight:700;line-height:1;padding:0 !important;box-sizing:border-box !important;' +
+          'display:flex;align-items:center;justify-content:center;' +
+        '">\u25cf</button>' +
+      '</div>';
     tab.style.cssText = [
       'position:fixed', 'right:0', 'top:50%',
       'transform:translateY(-50%)',
@@ -1720,6 +1758,14 @@
       if (jobLogEnabled) dismissed += dismissJobLog();
       updateTabCount();
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
+    });
+
+    document.getElementById('ljf-tab-hide-recent').addEventListener('click', e => {
+      e.stopPropagation();
+      hideRecentlyApplied = !hideRecentlyApplied;
+      GM_setValue('ljf_hideRecentlyApplied', hideRecentlyApplied ? 'true' : 'false');
+      applyRecentlyAppliedVisibility();
+      updateTabCount();
     });
 
     buildPanelContent();
@@ -2260,6 +2306,13 @@
           });
           content.appendChild(mkRow('Reapply after (days)', inp));
         })();
+        content.appendChild(divider());
+        content.appendChild(mkRow('Hide recently applied companies', mkToggle(hideRecentlyApplied, checked => {
+          hideRecentlyApplied = checked;
+          GM_setValue('ljf_hideRecentlyApplied', checked ? 'true' : 'false');
+          applyRecentlyAppliedVisibility();
+          updateTabCount();
+        })));
         content.appendChild(divider());
         content.appendChild(mkRow('Dismiss Actions', mkToggle(dismissActionsEnabled, checked => {
           if (checked && !dismissActionsEnabled) {
