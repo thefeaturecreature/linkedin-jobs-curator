@@ -48,6 +48,10 @@ These are the first thing to check when LinkedIn ships a layout change.
 | `ljf_onboarded` | `'false'` | Onboarding modal shown |
 | `ljf_quickDismissMode` | `'company'` | Quick dismiss mode (`company`, `title`, `location`) |
 | `ljf_hideRecentlyApplied` | `'false'` | Hide yellow (recently applied company) cards |
+| `ljf_dismiss_log` | `[]` | Dismiss log entries |
+| `ljf_dismissLogExpiry` | `'180'` | Days before dismiss log entries expire |
+| `ljf_dismissLogMatchLocation` | `'false'` | Match location when re-flagging dismissed jobs |
+| `ljf_dismissLogCardsRed` | `'false'` | Show dismiss log cards in red (vs grey) |
 
 ## Functions reference
 

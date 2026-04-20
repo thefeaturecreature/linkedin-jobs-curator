@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.4.8
+// @version      1.5.0
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -22,9 +22,10 @@
 
   // ─── Constants ────────────────────────────────────────────────────────────────
 
-  const STORAGE_KEY    = 'ljf_rules';
-  const LOG_KEY        = 'ljf_applied_log';
-  const SOURCE_URL     = 'https://github.com/thefeaturecreature/linkedin-jobs-curator';
+  const STORAGE_KEY      = 'ljf_rules';
+  const LOG_KEY          = 'ljf_applied_log';
+  const DISMISS_LOG_KEY  = 'ljf_dismiss_log';
+  const SOURCE_URL       = 'https://github.com/thefeaturecreature/linkedin-jobs-curator';
 
   const CARD_SEL    = 'li.jobs-search-results__list-item, li.scaffold-layout__list-item, li.discovery-templates-entity-item, a[componentkey]:has(div[data-display-contents] > p[style])';
   const TITLE_SEL   = '.job-card-list__title--link, .job-card-container__link, div[data-display-contents] > p[style] > span[aria-hidden="true"]';
@@ -78,6 +79,10 @@
     dismissedBg:     'rgba(200,120,0,0.12)',
     dismissedBorder: 'rgba(200,120,0,0.55)',
     dismissedBadge:  'rgba(180,100,0,0.85)',
+    // Previously dismissed log card (grey tint)
+    prevDismissedBg:     'rgba(100,100,110,0.10)',
+    prevDismissedBorder: 'rgba(100,100,110,0.45)',
+    prevDismissedBadge:  'rgba(80,80,90,0.82)',
     // Old company-label badge (gray, no card tint)
     staleBadge:      'rgba(80,80,90,0.72)',
   };
@@ -161,6 +166,11 @@
   let reapplyDays           = Math.max(1, parseInt(GM_getValue('ljf_reapplyDays', '14'), 10) || 14);
   let quickDismissMode      = GM_getValue('ljf_quickDismissMode', 'company');
   let hideRecentlyApplied   = GM_getValue('ljf_hideRecentlyApplied', 'false') !== 'false';
+  let dismissLog            = loadDismissLog();
+  let dismissLogIndex       = buildDismissLogIndex();
+  let dismissLogExpiry      = Math.max(1, parseInt(GM_getValue('ljf_dismissLogExpiry', '180'), 10) || 180);
+  let dismissLogMatchLocation = GM_getValue('ljf_dismissLogMatchLocation', 'false') === 'true';
+  let dismissLogCardsRed    = GM_getValue('ljf_dismissLogCardsRed', 'false') === 'true';
 
   function t() { return darkMode ? THEMES.dark : THEMES.light; }
 
@@ -790,6 +800,32 @@
     return idx;
   }
 
+  function loadDismissLog() {
+    try { return JSON.parse(GM_getValue(DISMISS_LOG_KEY, '[]')); }
+    catch { return []; }
+  }
+
+  function saveDismissLog() {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - dismissLogExpiry);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    dismissLog = dismissLog.filter(e => !e.date || e.date >= cutoffStr);
+    GM_setValue(DISMISS_LOG_KEY, JSON.stringify(dismissLog));
+    dismissLogIndex = buildDismissLogIndex();
+    updateDismissLogCount();
+  }
+
+  function buildDismissLogIndex() {
+    const idx = new Map();
+    for (const e of dismissLog) {
+      if (e.jobId) idx.set('id:' + e.jobId, e);
+      const ctKey = 'ct:' + (e.company || '').toLowerCase() + '\x00' + normalizeSenior((e.title || '').toLowerCase());
+      if (!idx.has(ctKey)) idx.set(ctKey, []);
+      idx.get(ctKey).push(e);
+    }
+    return idx;
+  }
+
   function addRule(type, value, label) {
     const rule = { id: Date.now(), type, value: value.trim(), label: label || value.trim(), enabled: true };
     rules.push(rule);
@@ -817,6 +853,20 @@
   function cardText(card, sel) {
     const el = card.querySelector(sel);
     return el ? el.textContent.trim() : '';
+  }
+
+  function cardJobId(card) {
+    const link = card.querySelector(TITLE_SEL);
+    if (!link) return null;
+    const m = (link.getAttribute('href') || '').match(/\/jobs\/view\/(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  function cardLocationText(card) {
+    return Array.from(card.querySelectorAll(SALARY_SEL))
+      .map(el => el.textContent.trim())
+      .filter(s => s && !s.includes('$'))
+      .join(' | ');
   }
 
   function isDismissed(card) {
@@ -1102,6 +1152,7 @@
     let total = 0;
     for (const card of getCards()) total += applyCardRules(card);
     applyJobLog();
+    applyDismissLog();
     applyRecentlyAppliedVisibility();
     applyViewHeroRules();
     applySavedJobRules();
@@ -1111,7 +1162,10 @@
 
   function applyRecentlyAppliedVisibility() {
     for (const card of getCards()) {
-      if (card.dataset.ljfJobLog && card.dataset.ljfJobLogLabel) {
+      const isYellow     = !!(card.dataset.ljfJobLog && card.dataset.ljfJobLogLabel);
+      const isDism       = !!card.dataset.ljfDismissed;
+      const isDismLog    = card.dataset.ljfDismissLog === 'grey';
+      if (isYellow || isDism || isDismLog) {
         card.style.display = hideRecentlyApplied ? 'none' : '';
       }
     }
@@ -1210,6 +1264,81 @@
     card.dataset.ljfJobLog = '1';
   }
 
+  function matchDismissLog(card) {
+    if (!dismissLog.length) return null;
+    const jobId = cardJobId(card);
+    if (jobId) {
+      const byId = dismissLogIndex.get('id:' + jobId);
+      if (byId) return byId;
+    }
+    const company = cardText(card, COMPANY_SEL).toLowerCase();
+    const title   = normalizeSenior(cardText(card, TITLE_SEL)).toLowerCase();
+    if (!company && !title) return null;
+    const ctKey  = 'ct:' + company + '\x00' + title;
+    const entries = dismissLogIndex.get(ctKey);
+    if (!entries || !entries.length) return null;
+    if (!dismissLogMatchLocation) return entries[0];
+    const loc = cardLocationText(card).toLowerCase();
+    return entries.find(e => (e.location || '').toLowerCase() === loc) || null;
+  }
+
+  function logDismissal(card) {
+    const jobId    = cardJobId(card);
+    const company  = cardText(card, COMPANY_SEL);
+    const title    = normalizeSenior(cardText(card, TITLE_SEL));
+    const location = cardLocationText(card);
+    const date     = new Date().toISOString().slice(0, 10);
+    if (!company && !title) return;
+
+    // Same jobId → update date
+    if (jobId) {
+      const existing = dismissLog.find(e => e.jobId === jobId);
+      if (existing) { existing.date = date; saveDismissLog(); return; }
+    }
+
+    // Same company+title → update if location matches (or setting off), else new entry
+    const compLow  = company.toLowerCase();
+    const titleLow = title.toLowerCase();
+    const match = dismissLog.find(e =>
+      (e.company || '').toLowerCase() === compLow &&
+      normalizeSenior(e.title || '').toLowerCase() === titleLow
+    );
+    if (match) {
+      if (!dismissLogMatchLocation || (match.location || '').toLowerCase() === location.toLowerCase()) {
+        match.date = date;
+        if (jobId && !match.jobId) match.jobId = jobId;
+        saveDismissLog();
+        return;
+      }
+    }
+
+    dismissLog.push({ jobId: jobId || null, company, title, location, date });
+    saveDismissLog();
+  }
+
+  function actDismissLog(card, entry) {
+    if (isDismissed(card) || card.dataset.ljfHighlighted || card.dataset.ljfJobLog || card.dataset.ljfDismissLog) return;
+    card.dataset.ljfDismissLog = dismissLogCardsRed ? 'red' : 'grey';
+    const isRed = dismissLogCardsRed;
+    if (!card.dataset.ljfGreenMatch) {
+      card.style.setProperty('background-color', isRed ? CC.dismissBg     : CC.prevDismissedBg,     'important');
+      card.style.setProperty('border-left',      '3px solid ' + (isRed ? CC.dismissBorder  : CC.prevDismissedBorder), 'important');
+      card.style.setProperty('box-sizing',        'border-box', 'important');
+    }
+    card.style.position = 'relative';
+    const days = daysSince(entry.date);
+    const label = '\u2716 dismissed' + (days !== null ? ' ' + days + 'd ago' : '');
+    addBadge(card, label, isRed ? CC.dismissBadge : CC.prevDismissedBadge);
+  }
+
+  function applyDismissLog() {
+    for (const card of getCards()) {
+      if (card.dataset.ljfDismissLog) continue;
+      const entry = matchDismissLog(card);
+      if (entry) actDismissLog(card, entry);
+    }
+  }
+
   function markDismissed(card) {
     card.style.setProperty('background-color', CC.dismissedBg, 'important');
     card.style.setProperty('border-left', '3px solid ' + CC.dismissedBorder, 'important');
@@ -1217,6 +1346,7 @@
     card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
     card.style.position = 'relative';
     addBadge(card, '\u2716 dismissed', CC.dismissedBadge);
+    if (hideRecentlyApplied) card.style.display = 'none';
   }
 
   function dismissJobLog() {
@@ -1226,6 +1356,7 @@
       if (entry && !isDismissed(card)) {
         const btn = card.querySelector(DISMISS_SEL);
         if (btn) {
+          logDismissal(card);
           card.dataset.ljfDismissed = '1';
           btn.click();
           markDismissed(card);
@@ -1245,6 +1376,7 @@
       if (matcher(card, rule) && !isDismissed(card)) {
         const btn = card.querySelector(DISMISS_SEL);
         if (btn) {
+          logDismissal(card);
           card.dataset.ljfDismissed = '1';
           btn.click();
           markDismissed(card);
@@ -1553,7 +1685,7 @@
     const greenEl = document.getElementById('ljf-tab-count-green');
 
     if (pill && countEl) {
-      const n = cards.filter(c => (c.dataset.ljfHighlighted || (c.dataset.ljfJobLog && !c.dataset.ljfJobLogLabel)) && !isDismissed(c)).length;
+      const n = cards.filter(c => (c.dataset.ljfHighlighted || (c.dataset.ljfJobLog && !c.dataset.ljfJobLogLabel) || c.dataset.ljfDismissLog === 'red') && !isDismissed(c)).length;
       if (n > 0) {
         countEl.textContent = n;
         pill.style.display = 'flex';
@@ -1587,11 +1719,15 @@
     const yellowCountEl = document.getElementById('ljf-tab-count-yellow');
     const eyeBtn        = document.getElementById('ljf-tab-hide-recent');
     if (yellowPill && yellowCountEl) {
-      const n = cards.filter(c => c.dataset.ljfJobLog && c.dataset.ljfJobLogLabel && !isDismissed(c)).length;
+      const n = cards.filter(c =>
+        (c.dataset.ljfJobLog && c.dataset.ljfJobLogLabel) ||
+        c.dataset.ljfDismissed ||
+        c.dataset.ljfDismissLog === 'grey'
+      ).length;
       if (n > 0) {
         yellowCountEl.textContent = n;
         yellowPill.style.display = 'flex';
-        if (eyeBtn) eyeBtn.textContent = hideRecentlyApplied ? '\u25cb' : '\u25cf';
+        if (eyeBtn) eyeBtn.textContent = hideRecentlyApplied ? '\u25cf' : '\u25cb';
       } else {
         yellowPill.style.display = 'none';
       }
@@ -1608,6 +1744,7 @@
       delete card.dataset.ljfDismissed;
       delete card.dataset.ljfGreenMatch;
       delete card.dataset.ljfRulesApplied;
+      delete card.dataset.ljfDismissLog;
       card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
       delete card.dataset.ljfJobLog;
       delete card.dataset.ljfJobLogLabel;
@@ -1644,6 +1781,7 @@
           delete card.dataset.ljfRulesApplied;
           delete card.dataset.ljfJobLog;
           delete card.dataset.ljfJobLogLabel;
+          delete card.dataset.ljfDismissLog;
           card.style.removeProperty('background-color');
           card.style.removeProperty('border-left');
           card.style.removeProperty('box-sizing');
@@ -1700,7 +1838,7 @@
           'width:16px !important;height:16px !important;min-width:16px !important;max-width:16px !important;color:#5a4800 !important;cursor:pointer;' +
           'font-size:9px !important;font-weight:700;line-height:1;padding:0 !important;box-sizing:border-box !important;' +
           'display:flex;align-items:center;justify-content:center;' +
-        '">\u25cf</button>' +
+        '">\u25cb</button>' +
       '</div>';
     tab.style.cssText = [
       'position:fixed', 'right:0', 'top:50%',
@@ -1820,7 +1958,10 @@
 
 <div id="ljf-pane-jobs" class="ljf-pane${activePanel==='jobs' ? ' ljf-active' : ''}"></div>
 
-<div id="ljf-status" class="ljf-status-bar">Ready</div>
+<div id="ljf-status" class="ljf-status-bar" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+  <span id="ljf-status-msg">Ready</span>
+  <span id="ljf-dismiss-log-count" style="font-size:10px;opacity:.6;white-space:nowrap;flex-shrink:0;"></span>
+</div>
 `;
   }
 
@@ -2314,6 +2455,38 @@
           updateTabCount();
         })));
         content.appendChild(divider());
+        (() => {
+          const inp = document.createElement('input');
+          inp.type  = 'number';
+          inp.min   = '1';
+          inp.max   = '3650';
+          inp.value = String(dismissLogExpiry);
+          inp.style.cssText = [
+            'width:52px', 'text-align:center', 'border-radius:4px',
+            `border:1px solid ${th.rowBorder}`, `background:${th.rowBg}`,
+            `color:${th.panelText}`, 'font-size:12px', 'padding:3px 6px',
+          ].join(';');
+          inp.addEventListener('change', () => {
+            const v = Math.max(1, parseInt(inp.value, 10) || 180);
+            inp.value = String(v);
+            dismissLogExpiry = v;
+            GM_setValue('ljf_dismissLogExpiry', String(v));
+          });
+          content.appendChild(mkRow('Dismiss log expiry (days)', inp));
+        })();
+        content.appendChild(divider());
+        content.appendChild(mkRow('Match location when re-flagging', mkToggle(dismissLogMatchLocation, checked => {
+          dismissLogMatchLocation = checked;
+          GM_setValue('ljf_dismissLogMatchLocation', checked ? 'true' : 'false');
+        })));
+        content.appendChild(divider());
+        content.appendChild(mkRow('Dismissed log cards red', mkToggle(dismissLogCardsRed, checked => {
+          dismissLogCardsRed = checked;
+          GM_setValue('ljf_dismissLogCardsRed', checked ? 'true' : 'false');
+          clearHighlights();
+          applyAllRules();
+        })));
+        content.appendChild(divider());
         content.appendChild(mkRow('Dismiss Actions', mkToggle(dismissActionsEnabled, checked => {
           if (checked && !dismissActionsEnabled) {
             overlay.remove();
@@ -2336,8 +2509,13 @@
         grid.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
         grid.appendChild(mkBackupBtn('\u2197 Export Rules',    exportRules));
         grid.appendChild(mkBackupBtn('\u2198 Import Rules',    importRules));
-        grid.appendChild(mkBackupBtn('\u2197 Export Log',      exportAppliedLog));
-        grid.appendChild(mkBackupBtn('\u2198 Import Log',      importAppliedLog));
+
+        let includeDismissLog = false;
+        grid.appendChild(mkRow('Include dismiss log', mkToggle(false, checked => { includeDismissLog = checked; })));
+
+        grid.appendChild(mkBackupBtn('\u2197 Export Log',   () => exportAppliedLog(includeDismissLog)));
+        grid.appendChild(mkBackupBtn('\u2198 Import Log',   importAppliedLog));
+
         const csvLabel = document.createElement('div');
         csvLabel.textContent = 'Job Log — CSV';
         csvLabel.style.cssText = [
@@ -2346,8 +2524,8 @@
           `border-top:1px solid ${th.border2}`, 'padding-top:8px', 'margin-top:2px',
         ].join(';');
         grid.appendChild(csvLabel);
-        grid.appendChild(mkBackupBtn('\u2197 Export Log CSV',      exportAppliedLogCsv));
-        grid.appendChild(mkBackupBtn('\u2198 Import Log CSV',      importAppliedLogCsv));
+        grid.appendChild(mkBackupBtn('\u2197 Export Log CSV',   () => exportAppliedLogCsv(includeDismissLog)));
+        grid.appendChild(mkBackupBtn('\u2198 Import Log CSV',   importAppliedLogCsv));
         grid.appendChild(mkBackupBtn('\u2B07 Download CSV Template', downloadLogCsvTemplate));
         content.appendChild(grid);
       }
@@ -2634,12 +2812,13 @@
 
   // ─── Applied Log Export / Import ─────────────────────────────────────────────
 
-  function exportAppliedLog() {
+  function exportAppliedLog(withDismissLog) {
     const payload = {
       script:      'LinkedIn Job Filter',
       exported:    new Date().toISOString(),
       appliedLog:  appliedLog,
     };
+    if (withDismissLog) payload.dismissLog = dismissLog;
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -2647,7 +2826,8 @@
     a.download = 'linkedin-applied-log.json';
     a.click();
     URL.revokeObjectURL(url);
-    setStatus('Applied log exported (' + appliedLog.length + ' entries).');
+    const extra = withDismissLog ? ' + ' + dismissLog.length + ' dismissed' : '';
+    setStatus('Applied log exported (' + appliedLog.length + ' applied' + extra + ').');
   }
 
   function importAppliedLog() {
@@ -2667,11 +2847,12 @@
             setStatus('\u26A0 Invalid log file: expected an array or an object with an "appliedLog" array.');
             return;
           }
-          if (incoming.length === 0) {
+          if (incoming.length === 0 && !Array.isArray(data.dismissLog)) {
             setStatus('\u26A0 No log entries found in file.');
             return;
           }
-          showLogImportDialog(incoming);
+          const incomingDismiss = Array.isArray(data.dismissLog) ? data.dismissLog : null;
+          showLogImportDialog(incoming, incomingDismiss);
         } catch (e) {
           setStatus('\u26A0 Invalid log file: ' + e.message);
         }
@@ -2681,7 +2862,7 @@
     input.click();
   }
 
-  function showLogImportDialog(incoming) {
+  function showLogImportDialog(incoming, incomingDismiss) {
     const th = t();
     const overlay = document.createElement('div');
     overlay.style.cssText = [
@@ -2699,11 +2880,12 @@
       'box-shadow:0 8px 32px rgba(0,0,0,.6)',
     ].join(';');
 
-    const countLabel = incoming.length + ' entr' + (incoming.length !== 1 ? 'ies' : 'y');
+    const countLabel = incoming.length + ' applied';
+    const dismissLabel = incomingDismiss ? ' + ' + incomingDismiss.length + ' dismissed' : '';
     modal.innerHTML = `
-<div style="font-size:14px;font-weight:600;margin-bottom:8px;">Import Applied Log</div>
+<div style="font-size:14px;font-weight:600;margin-bottom:8px;">Import Log</div>
 <div style="font-size:12px;color:${th.ruleType};margin-bottom:18px;">
-  ${escHtml(countLabel)} found. Overwrite the existing log, or append to it?
+  ${escHtml(countLabel + dismissLabel)} found. Overwrite the existing log, or append to it?
 </div>
 <div style="display:flex;gap:8px;justify-content:flex-end;">
   <button id="ljf-limp-cancel" style="
@@ -2720,26 +2902,40 @@
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
+    function applyDismissImport(mode) {
+      if (!incomingDismiss || !incomingDismiss.length) return;
+      if (mode === 'append') {
+        dismissLog.push(...incomingDismiss);
+      } else {
+        dismissLog = incomingDismiss;
+      }
+      saveDismissLog();
+    }
+
     modal.querySelector('#ljf-limp-cancel').addEventListener('click', () => overlay.remove());
 
     modal.querySelector('#ljf-limp-append').addEventListener('click', () => {
       appliedLog.push(...incoming);
       saveAppliedLog();
+      applyDismissImport('append');
       overlay.remove();
       clearHighlights();
       applyAllRules();
       if (panelOpen) { renderRules(); renderJobsPane(); }
-      setStatus('Log imported \u2014 ' + incoming.length + ' entr' + (incoming.length !== 1 ? 'ies' : 'y') + ' appended.');
+      const extra = incomingDismiss ? ' + ' + incomingDismiss.length + ' dismissed' : '';
+      setStatus('Log imported \u2014 ' + incoming.length + ' applied' + extra + ' appended.');
     });
 
     modal.querySelector('#ljf-limp-overwrite').addEventListener('click', () => {
       appliedLog = incoming;
       saveAppliedLog();
+      applyDismissImport('overwrite');
       overlay.remove();
       clearHighlights();
       applyAllRules();
       if (panelOpen) { renderRules(); renderJobsPane(); }
-      setStatus('Log imported \u2014 ' + incoming.length + ' entr' + (incoming.length !== 1 ? 'ies' : 'y') + ' (replaced).');
+      const extra = incomingDismiss ? ' + ' + incomingDismiss.length + ' dismissed' : '';
+      setStatus('Log imported \u2014 ' + incoming.length + ' applied' + extra + ' (replaced).');
     });
   }
 
@@ -2783,11 +2979,18 @@
       .split('\n').filter(l => l.trim()).map(parseCsvLine);
   }
 
-  function exportAppliedLogCsv() {
-    const rows = [LOG_CSV_HEADERS.join(',')];
+  function exportAppliedLogCsv(withDismissLog) {
+    const headers = [...LOG_CSV_HEADERS, 'type'];
+    const rows = [headers.join(',')];
     for (const e of appliedLog) {
       rows.push([e.company, e.title, e.date, e.status || 'applied',
-                 e.statusDate || '', e.url || '', e.notes || ''].map(csvEscape).join(','));
+                 e.statusDate || '', e.url || '', e.notes || '', 'applied'].map(csvEscape).join(','));
+    }
+    if (withDismissLog) {
+      for (const e of dismissLog) {
+        rows.push([e.company || '', e.title || '', e.date || '', '', '',
+                   '', '', 'dismissed'].map(csvEscape).join(','));
+      }
     }
     const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
@@ -2796,7 +2999,8 @@
     a.download = 'linkedin-applied-log.csv';
     a.click();
     URL.revokeObjectURL(url);
-    setStatus('Applied log exported as CSV (' + appliedLog.length + ' entr' + (appliedLog.length !== 1 ? 'ies' : 'y') + ').');
+    const total = appliedLog.length + (withDismissLog ? dismissLog.length : 0);
+    setStatus('Log exported as CSV (' + total + ' entr' + (total !== 1 ? 'ies' : 'y') + ').');
   }
 
   function importAppliedLogCsv() {
@@ -2816,17 +3020,24 @@
             const idx = headers.indexOf(name);
             return idx >= 0 ? (row[idx] || '').trim() : '';
           };
-          const incoming = rows.slice(1).map(row => ({
-            company:    get(row, 'company'),
-            title:      get(row, 'title'),
-            date:       get(row, 'date'),
-            status:     (get(row, 'status') || 'applied').toLowerCase(),
-            statusDate: get(row, 'statusdate'),
-            url:        get(row, 'url'),
-            notes:      get(row, 'notes'),
-          })).filter(e => e.company && e.title && e.date);
-          if (!incoming.length) { setStatus('\u26A0 No valid entries in CSV (need company + title + date).'); return; }
-          showLogImportDialog(incoming);
+          const allEntries = rows.slice(1).filter(row => get(row, 'company') && get(row, 'title') && get(row, 'date'));
+          if (!allEntries.length) { setStatus('\u26A0 No valid entries in CSV (need company + title + date).'); return; }
+
+          const incomingApplied = allEntries
+            .filter(row => get(row, 'type').toLowerCase() !== 'dismissed')
+            .map(row => ({
+              company: get(row, 'company'), title: get(row, 'title'), date: get(row, 'date'),
+              status: (get(row, 'status') || 'applied').toLowerCase(),
+              statusDate: get(row, 'statusdate'), url: get(row, 'url'), notes: get(row, 'notes'),
+            }));
+          const incomingDismiss = allEntries
+            .filter(row => get(row, 'type').toLowerCase() === 'dismissed')
+            .map(row => ({
+              company: get(row, 'company'), title: get(row, 'title'), date: get(row, 'date'),
+              jobId: null, location: '',
+            }));
+
+          showLogImportDialog(incomingApplied, incomingDismiss.length ? incomingDismiss : null);
         } catch {
           setStatus('\u26A0 Failed to parse CSV file.');
         }
@@ -2862,6 +3073,7 @@
     const list = document.getElementById('ljf-rules-list');
     if (!list) return;
     list.innerHTML = '';
+    updateDismissLogCount();
 
     const companyDismiss   = rules.filter(r => r.type === 'companydismiss');
     const titleDismiss     = rules.filter(r => r.type === 'titledismiss');
@@ -3135,8 +3347,14 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
   }
 
   function setStatus(msg) {
-    const el = document.getElementById('ljf-status');
+    const el = document.getElementById('ljf-status-msg');
     if (el) el.textContent = msg;
+  }
+
+  function updateDismissLogCount() {
+    const el = document.getElementById('ljf-dismiss-log-count');
+    if (!el) return;
+    el.textContent = dismissLog.length ? dismissLog.length + ' dismissed' : '';
   }
 
   function escHtml(s) {
@@ -3367,6 +3585,12 @@ function setupApplyCapture() {
         const card = undoBtn.closest(CARD_SEL);
         if (card) resetCard(card);
         setTimeout(() => { clearHighlights(); applyAllRules(); }, 400);
+      }
+      // Capture native X dismiss button clicks to log the dismissal
+      const dismissBtn = e.target.closest(DISMISS_SEL);
+      if (dismissBtn) {
+        const card = dismissBtn.closest(CARD_SEL);
+        if (card && !isDismissed(card)) logDismissal(card);
       }
     }, true);
   }
