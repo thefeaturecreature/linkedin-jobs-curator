@@ -1727,7 +1727,7 @@
       if (n > 0) {
         yellowCountEl.textContent = n;
         yellowPill.style.display = 'flex';
-        if (eyeBtn) eyeBtn.textContent = hideRecentlyApplied ? '\u25cb' : '\u25cf';
+        if (eyeBtn) eyeBtn.textContent = hideRecentlyApplied ? '\u25cf' : '\u25cb';
       } else {
         yellowPill.style.display = 'none';
       }
@@ -1838,7 +1838,7 @@
           'width:16px !important;height:16px !important;min-width:16px !important;max-width:16px !important;color:#5a4800 !important;cursor:pointer;' +
           'font-size:9px !important;font-weight:700;line-height:1;padding:0 !important;box-sizing:border-box !important;' +
           'display:flex;align-items:center;justify-content:center;' +
-        '">\u25cf</button>' +
+        '">\u25cb</button>' +
       '</div>';
     tab.style.cssText = [
       'position:fixed', 'right:0', 'top:50%',
@@ -2510,21 +2510,8 @@
         grid.appendChild(mkBackupBtn('\u2197 Export Rules',    exportRules));
         grid.appendChild(mkBackupBtn('\u2198 Import Rules',    importRules));
 
-        // Dismiss log checkbox
         let includeDismissLog = false;
-        const dismissChkRow = document.createElement('label');
-        dismissChkRow.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;padding:2px 0;';
-        const dismissChk = document.createElement('input');
-        dismissChk.type = 'checkbox';
-        dismissChk.checked = false;
-        dismissChk.style.cssText = 'width:14px;height:14px;cursor:pointer;flex-shrink:0;';
-        dismissChk.addEventListener('change', () => { includeDismissLog = dismissChk.checked; });
-        const dismissChkLbl = document.createElement('span');
-        dismissChkLbl.textContent = 'Include dismiss log';
-        dismissChkLbl.style.cssText = `font-size:11px;color:${th.ruleType};`;
-        dismissChkRow.appendChild(dismissChk);
-        dismissChkRow.appendChild(dismissChkLbl);
-        grid.appendChild(dismissChkRow);
+        grid.appendChild(mkRow('Include dismiss log', mkToggle(false, checked => { includeDismissLog = checked; })));
 
         grid.appendChild(mkBackupBtn('\u2197 Export Log',   () => exportAppliedLog(includeDismissLog)));
         grid.appendChild(mkBackupBtn('\u2198 Import Log',   importAppliedLog));
