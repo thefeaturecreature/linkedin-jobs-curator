@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.5.1
+// @version      1.6.0
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -141,7 +141,9 @@
   let jobSort            = { col: 'date', dir: 'desc' };
   let companyFilter      = '';
   let companyFilterOpen  = false;
-  let editingLogIdx      = null;
+  let editingLogIdx        = null;
+  let editingDismissLogIdx = null;
+  let activeLogView        = 'jobs';   // 'jobs' | 'dismissed'
   let editingRuleId      = null;
   let editingOrigType    = null;
   let collapsedSections  = {
@@ -492,12 +494,27 @@
     const pane = document.getElementById('ljf-pane-jobs');
     if (!pane) return;
 
-    const COLS     = ['company','title','date','days','status','link','del'];
-    const LABELS   = { company:'Company', title:'Title', date:'Applied', days:'Age', status:'Status', link:'', del:'' };
-    const WIDTHS   = { company:'26%', title:'33%', date:'12%', days:'7%', status:'12%', link:'5%', del:'5%' };
-    const SORTABLE = new Set(['company','title','date','status']);
+    const isDismView = activeLogView === 'dismissed';
 
-    const indexed = appliedLog.map((e, i) => ({ e, i }));
+    const COLS = isDismView
+      ? ['company', 'title', 'date', 'days', 'del']
+      : ['company', 'title', 'date', 'days', 'status', 'link', 'del'];
+    const LABELS = isDismView
+      ? { company:'Company', title:'Title', date:'Dismissed', days:'Age', del:'' }
+      : { company:'Company', title:'Title', date:'Applied', days:'Age', status:'Status', link:'', del:'' };
+    const WIDTHS = isDismView
+      ? { company:'38%', title:'38%', date:'11%', days:'7%', del:'6%' }
+      : { company:'26%', title:'33%', date:'12%', days:'7%', status:'12%', link:'5%', del:'5%' };
+    const SORTABLE = isDismView
+      ? new Set(['company', 'title', 'date'])
+      : new Set(['company', 'title', 'date', 'status']);
+
+    if (!SORTABLE.has(jobSort.col)) jobSort.col = 'date';
+
+    const dataLog = isDismView ? dismissLog : appliedLog;
+    const colCount = COLS.length;
+
+    const indexed = dataLog.map((e, i) => ({ e, i }));
     indexed.sort(({ e: a, i: ai }, { e: b, i: bi }) => {
       let av, bv;
       const col = jobSort.col;
@@ -508,9 +525,9 @@
       else { av = ''; bv = ''; }
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
       if (cmp !== 0) return jobSort.dir === 'asc' ? cmp : -cmp;
-      // tiebreak: preserve original index order (asc = earliest added first, desc = latest added first)
       return jobSort.dir === 'asc' ? ai - bi : bi - ai;
     });
+
     const magSvg = `<svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4"/><line x1="10" y1="10" x2="14" y2="14"/></svg>`;
     const headerCells = COLS.map(col => {
       const active = jobSort.col === col;
@@ -532,44 +549,96 @@
     const STATUS_OPTIONS = ['applied','interviewing','offer','rejected','closed','withdrawn'];
     const _now = new Date();
     const today = [_now.getFullYear(), String(_now.getMonth() + 1).padStart(2, '0'), String(_now.getDate()).padStart(2, '0')].join('-');
-    const companies = [...new Set(appliedLog.map(e => e.company).filter(Boolean))].sort();
-    const titles    = [...new Set(appliedLog.map(e => e.title).filter(Boolean))].sort();
+    const companies = [...new Set(dataLog.map(e => e.company).filter(Boolean))].sort();
+    const titles    = [...new Set(dataLog.map(e => e.title).filter(Boolean))].sort();
     const coOptions = companies.map(c => `<option value="${escHtml(c)}">`).join('');
     const tiOptions = titles.map(ti => `<option value="${escHtml(ti)}">`).join('');
 
-    const rows = indexed.length === 0
-      ? `<tr><td colspan="7" class="ljf-jobs-empty">No applications logged yet.</td></tr>`
-      : indexed.map(({ e: entry, i: logIdx }) => {
-          const status  = entry.status || 'applied';
-          const sc      = statusStyle(status);
-          const company = entry.company || '—';
-          const title   = entry.title   || '—';
-          const url     = entry.url     || '';
-          const dateStr = entry.date    || '';
-          const opts    = STATUS_OPTIONS.map(s =>
-            `<option value="${s}"${s === status ? ' selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
-          ).join('');
-          const liIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" focusable="false" class="ljf-li-icon">
-            <path d="M15 2v12a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1h12a1 1 0 011 1zM5 6H3v7h2zm.25-2A1.25 1.25 0 104 5.25 1.25 1.25 0 005.25 4zM13 9.29c0-2.2-.73-3.49-2.86-3.49A2.71 2.71 0 007.89 7V6H6v7h2V9.73a1.73 1.73 0 011.52-1.92h.14C10.82 7.8 11 8.94 11 9.73V13h2z" fill="#0a66c2"></path>
-          </svg>`;
-          return `<tr data-log-idx="${logIdx}" data-company="${escHtml(company.toLowerCase())}">
-            <td class="ljf-col-trunc ljf-co-cell" data-company="${escHtml(company)}" title="${escHtml(company)}">${escHtml(company)}</td>
-            <td class="ljf-col-trunc" title="${escHtml(title)}">${escHtml(title)}</td>
-            <td class="ljf-col-muted">${escHtml(dateStr) || '—'}</td>
-            <td class="ljf-col-muted ljf-center">${daysAgo(dateStr)}</td>
-            <td style="padding:1px 3px;">
-              <select class="ljf-status-sel" data-log-idx="${logIdx}" style="background:${sc.bg};color:${sc.text};">
-                ${opts}
-              </select>
-            </td>
-            <td class="ljf-col-icon">
-              ${url ? `<a href="${escHtml(url)}" target="_blank" rel="noopener" class="ljf-li-link" title="Open listing">${liIcon}</a>` : ''}
-            </td>
-            <td class="ljf-col-icon">
-              <button class="ljf-log-del" data-log-idx="${logIdx}" title="Delete entry">✕</button>
-            </td>
-          </tr>`;
-        }).join('');
+    let rows;
+    if (indexed.length === 0) {
+      rows = `<tr><td colspan="${colCount}" class="ljf-jobs-empty">${isDismView ? 'No dismissed jobs logged yet.' : 'No applications logged yet.'}</td></tr>`;
+    } else if (isDismView) {
+      rows = indexed.map(({ e: entry, i: logIdx }) => {
+        const company = entry.company || '—';
+        const title   = entry.title   || '—';
+        const dateStr = entry.date    || '';
+        return `<tr data-dm-idx="${logIdx}" data-company="${escHtml(company.toLowerCase())}">
+          <td class="ljf-col-trunc" title="${escHtml(company)}">${escHtml(company)}</td>
+          <td class="ljf-col-trunc" title="${escHtml(title)}">${escHtml(title)}</td>
+          <td class="ljf-col-muted">${escHtml(dateStr) || '—'}</td>
+          <td class="ljf-col-muted ljf-center">${daysAgo(dateStr)}</td>
+          <td class="ljf-col-icon">
+            <button class="ljf-log-del" data-dm-idx="${logIdx}" title="Delete entry">✕</button>
+          </td>
+        </tr>`;
+      }).join('');
+    } else {
+      rows = indexed.map(({ e: entry, i: logIdx }) => {
+        const status  = entry.status || 'applied';
+        const sc      = statusStyle(status);
+        const company = entry.company || '—';
+        const title   = entry.title   || '—';
+        const url     = entry.url     || '';
+        const dateStr = entry.date    || '';
+        const opts    = STATUS_OPTIONS.map(s =>
+          `<option value="${s}"${s === status ? ' selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
+        ).join('');
+        const liIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" focusable="false" class="ljf-li-icon">
+          <path d="M15 2v12a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1h12a1 1 0 011 1zM5 6H3v7h2zm.25-2A1.25 1.25 0 104 5.25 1.25 1.25 0 005.25 4zM13 9.29c0-2.2-.73-3.49-2.86-3.49A2.71 2.71 0 007.89 7V6H6v7h2V9.73a1.73 1.73 0 011.52-1.92h.14C10.82 7.8 11 8.94 11 9.73V13h2z" fill="#0a66c2"></path>
+        </svg>`;
+        return `<tr data-log-idx="${logIdx}" data-company="${escHtml(company.toLowerCase())}">
+          <td class="ljf-col-trunc ljf-co-cell" data-company="${escHtml(company)}" title="${escHtml(company)}">${escHtml(company)}</td>
+          <td class="ljf-col-trunc" title="${escHtml(title)}">${escHtml(title)}</td>
+          <td class="ljf-col-muted">${escHtml(dateStr) || '—'}</td>
+          <td class="ljf-col-muted ljf-center">${daysAgo(dateStr)}</td>
+          <td style="padding:1px 3px;">
+            <select class="ljf-status-sel" data-log-idx="${logIdx}" style="background:${sc.bg};color:${sc.text};">
+              ${opts}
+            </select>
+          </td>
+          <td class="ljf-col-icon">
+            ${url ? `<a href="${escHtml(url)}" target="_blank" rel="noopener" class="ljf-li-link" title="Open listing">${liIcon}</a>` : ''}
+          </td>
+          <td class="ljf-col-icon">
+            <button class="ljf-log-del" data-log-idx="${logIdx}" title="Delete entry">✕</button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Footer toggle
+    const toggleOn = activeLogView === 'jobs';
+    const toggleHtml = `
+<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--ljf-count-text);cursor:pointer;" id="ljf-log-view-toggle">
+  <span>Log</span>
+  <div style="position:relative;width:28px;height:16px;border-radius:8px;flex-shrink:0;background:${toggleOn ? '#4e7af7' : (darkMode ? '#444' : '#bbb')};">
+    <div style="position:absolute;top:2px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);left:${toggleOn ? '14px' : '2px'};transition:left .15s;"></div>
+  </div>
+  <span>${toggleOn ? 'Jobs' : 'Dismissed'}</span>
+</div>`;
+
+    // Form
+    const addFormHtml = isDismView ? `
+<div id="ljf-add-job-row" class="ljf-add-job-row">
+  <input id="ljf-aj-company" class="ljf-add-job-input" type="text" placeholder="Company" list="ljf-co-list" autocomplete="off" style="flex:0 0 35%;">
+  <input id="ljf-aj-title"   class="ljf-add-job-input" type="text" placeholder="Title"   list="ljf-ti-list" autocomplete="off" style="flex:1;min-width:0;">
+  <input id="ljf-aj-date"    class="ljf-add-job-input" type="date" value="${today}" style="flex:0 0 14%;">
+  <button id="ljf-aj-add" class="ljf-add-job-submit">Save</button>
+</div>` : `
+<div id="ljf-add-job-row" class="ljf-add-job-row">
+  <input id="ljf-aj-company" class="ljf-add-job-input" type="text" placeholder="Company"  list="ljf-co-list" autocomplete="off" style="flex:0 0 26%;">
+  <input id="ljf-aj-title"   class="ljf-add-job-input" type="text" placeholder="Title"    list="ljf-ti-list" autocomplete="off" style="flex:0 0 33%;">
+  <input id="ljf-aj-date"    class="ljf-add-job-input" type="date" value="${today}" style="flex:0 0 17%;">
+  <select id="ljf-aj-status" class="ljf-add-job-sel" style="flex:0 0 12%;">
+    ${STATUS_OPTIONS.map(s => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join('')}
+  </select>
+  <input id="ljf-aj-url" class="ljf-add-job-input" type="url" placeholder="Job URL" autocomplete="off" style="flex:1;min-width:0;">
+  <button id="ljf-aj-add" class="ljf-add-job-submit">Save</button>
+</div>`;
+
+    const footerStats = isDismView
+      ? `<span>${indexed.length} dismissed</span>`
+      : `<span>${indexed.length} application${indexed.length === 1 ? '' : 's'}</span>${computeStats(appliedLog)}`;
 
     pane.innerHTML = `
 <datalist id="ljf-co-list">${coOptions}</datalist>
@@ -579,7 +648,7 @@
     <thead>
       <tr>${headerCells}</tr>
       <tr id="ljf-co-filter-row"${companyFilterOpen || companyFilter ? '' : ' style="display:none"'}>
-        <td colspan="7">
+        <td colspan="${colCount}">
           <div class="ljf-co-filter-wrap">
             <input id="ljf-co-filter-input" type="text" placeholder="Filter by company…" value="${escHtml(companyFilter)}" autocomplete="off">
             <button class="ljf-co-filter-clear" title="Clear filter">✕</button>
@@ -590,22 +659,13 @@
     <tbody>${rows}</tbody>
   </table>
 </div>
-<div id="ljf-add-job-row" class="ljf-add-job-row">
-  <input id="ljf-aj-company" class="ljf-add-job-input" type="text" placeholder="Company"  list="ljf-co-list" autocomplete="off" style="flex:0 0 26%;">
-  <input id="ljf-aj-title"   class="ljf-add-job-input" type="text" placeholder="Title"    list="ljf-ti-list" autocomplete="off" style="flex:0 0 33%;">
-  <input id="ljf-aj-date"    class="ljf-add-job-input" type="date" value="${today}" style="flex:0 0 17%;">
-  <select id="ljf-aj-status" class="ljf-add-job-sel" style="flex:0 0 12%;">
-    ${STATUS_OPTIONS.map(s => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join('')}
-  </select>
-  <input id="ljf-aj-url" class="ljf-add-job-input" type="url" placeholder="Job URL" autocomplete="off" style="flex:1;min-width:0;">
-  <button id="ljf-aj-add" class="ljf-add-job-submit">Save</button>
-</div>
+${addFormHtml}
 <div id="ljf-jobs-footer" class="ljf-jobs-footer">
-  <div class="ljf-footer-stats">
-    <span>${indexed.length} application${indexed.length === 1 ? '' : 's'}</span>
-    ${computeStats(appliedLog)}
+  <div class="ljf-footer-stats">${footerStats}</div>
+  <div style="display:flex;align-items:center;gap:6px;">
+    ${toggleHtml}
+    <button id="ljf-footer-add" class="ljf-footer-add" title="${isDismView ? 'Add dismissed entry' : 'Add job manually'}">+</button>
   </div>
-  <button id="ljf-footer-add" class="ljf-footer-add" title="Add job manually">+</button>
 </div>`;
 
     // Sort header click handlers
@@ -623,21 +683,33 @@
       });
     });
 
+    // Log view toggle
+    pane.querySelector('#ljf-log-view-toggle')?.addEventListener('click', () => {
+      activeLogView = activeLogView === 'jobs' ? 'dismissed' : 'jobs';
+      editingLogIdx = null;
+      editingDismissLogIdx = null;
+      companyFilter = '';
+      companyFilterOpen = false;
+      jobSort.col = 'date';
+      jobSort.dir = 'desc';
+      renderJobsPane();
+    });
+
     // Company filter
     function applyCompanyFilter() {
       const q = companyFilter.toLowerCase();
+      const rowSel = isDismView ? 'tbody tr[data-dm-idx]' : 'tbody tr[data-log-idx]';
       let visible = 0;
-      pane.querySelectorAll('tbody tr[data-log-idx]').forEach(tr => {
+      pane.querySelectorAll(rowSel).forEach(tr => {
         const show = !q || (tr.dataset.company || '').includes(q);
         tr.style.display = show ? '' : 'none';
         if (show) visible++;
       });
       const countEl = pane.querySelector('.ljf-footer-stats span');
       if (countEl) {
-        const total = appliedLog.length;
-        countEl.textContent = q
-          ? visible + ' of ' + total + ' application' + (total === 1 ? '' : 's')
-          : total + ' application' + (total === 1 ? '' : 's');
+        const total = dataLog.length;
+        const label = isDismView ? 'dismissed' : ('application' + (total === 1 ? '' : 's'));
+        countEl.textContent = q ? `${visible} of ${total} ${label}` : `${total} ${label}`;
       }
     }
 
@@ -664,70 +736,109 @@
 
     applyCompanyFilter();
 
-    // Status dropdown change handlers
-    pane.querySelectorAll('.ljf-status-sel').forEach(sel => {
-      sel.addEventListener('change', () => {
-        const idx = +sel.dataset.logIdx;
-        if (!appliedLog[idx]) return;
-        appliedLog[idx].status    = sel.value;
-        appliedLog[idx].statusDate = localDateStr();
-        saveAppliedLog();
-        const sc = statusStyle(sel.value);
-        sel.style.background  = sc.bg;
-        sel.style.color       = sc.text;
-        sel.style.borderColor = sc.bdr;
+    // Status dropdowns (jobs view only)
+    if (!isDismView) {
+      pane.querySelectorAll('.ljf-status-sel').forEach(sel => {
+        sel.addEventListener('change', () => {
+          const idx = +sel.dataset.logIdx;
+          if (!appliedLog[idx]) return;
+          appliedLog[idx].status     = sel.value;
+          appliedLog[idx].statusDate = localDateStr();
+          saveAppliedLog();
+          const sc = statusStyle(sel.value);
+          sel.style.background  = sc.bg;
+          sel.style.color       = sc.text;
+          sel.style.borderColor = sc.bdr;
+        });
       });
-    });
+    }
 
-    // Delete button handlers
+    // Delete buttons
     pane.querySelectorAll('.ljf-log-del').forEach(btn => {
       btn.addEventListener('click', () => {
-        const idx = +btn.dataset.logIdx;
-        const entry = appliedLog[idx];
-        if (!entry) return;
-        const label = [entry.company, entry.title].filter(Boolean).join(' — ') || 'this entry';
-        if (!confirm('Delete "' + label + '" from the job log?')) return;
-        appliedLog.splice(idx, 1);
-        saveAppliedLog();
-        clearHighlights();
-        applyAllRules();
-        renderJobsPane();
+        if (isDismView) {
+          const idx = +btn.dataset.dmIdx;
+          const entry = dismissLog[idx];
+          if (!entry) return;
+          const label = [entry.company, entry.title].filter(Boolean).join(' — ') || 'this entry';
+          if (!confirm('Delete "' + label + '" from the dismiss log?')) return;
+          dismissLog.splice(idx, 1);
+          saveDismissLog();
+          clearHighlights();
+          applyAllRules();
+          renderJobsPane();
+        } else {
+          const idx = +btn.dataset.logIdx;
+          const entry = appliedLog[idx];
+          if (!entry) return;
+          const label = [entry.company, entry.title].filter(Boolean).join(' — ') || 'this entry';
+          if (!confirm('Delete "' + label + '" from the job log?')) return;
+          appliedLog.splice(idx, 1);
+          saveAppliedLog();
+          clearHighlights();
+          applyAllRules();
+          renderJobsPane();
+        }
       });
     });
 
     // Row click → populate form for editing
-    pane.querySelectorAll('tbody tr[data-log-idx]').forEach(tr => {
-      tr.addEventListener('click', e => {
-        if (e.target.closest('select, button, a')) return;
-        const idx = +tr.dataset.logIdx;
-        const entry = appliedLog[idx];
-        if (!entry) return;
-        editingLogIdx = idx;
-        const formRow = pane.querySelector('#ljf-add-job-row');
-        formRow.classList.add('ljf-open');
-        pane.querySelector('#ljf-aj-company').value = entry.company || '';
-        pane.querySelector('#ljf-aj-title').value   = entry.title   || '';
-        pane.querySelector('#ljf-aj-date').value    = entry.date    || '';
-        pane.querySelector('#ljf-aj-status').value  = entry.status  || 'applied';
-        pane.querySelector('#ljf-aj-url').value     = entry.url     || '';
-        pane.querySelectorAll('tbody tr[data-log-idx]').forEach(r => r.classList.remove('ljf-row-editing'));
-        tr.classList.add('ljf-row-editing');
-        pane.querySelector('#ljf-aj-company')?.focus();
+    if (isDismView) {
+      pane.querySelectorAll('tbody tr[data-dm-idx]').forEach(tr => {
+        tr.addEventListener('click', e => {
+          if (e.target.closest('button')) return;
+          const idx = +tr.dataset.dmIdx;
+          const entry = dismissLog[idx];
+          if (!entry) return;
+          editingDismissLogIdx = idx;
+          const formRow = pane.querySelector('#ljf-add-job-row');
+          formRow.classList.add('ljf-open');
+          pane.querySelector('#ljf-aj-company').value = entry.company || '';
+          pane.querySelector('#ljf-aj-title').value   = entry.title   || '';
+          pane.querySelector('#ljf-aj-date').value    = entry.date    || '';
+          pane.querySelectorAll('tbody tr[data-dm-idx]').forEach(r => r.classList.remove('ljf-row-editing'));
+          tr.classList.add('ljf-row-editing');
+          pane.querySelector('#ljf-aj-company')?.focus();
+        });
       });
-    });
+    } else {
+      pane.querySelectorAll('tbody tr[data-log-idx]').forEach(tr => {
+        tr.addEventListener('click', e => {
+          if (e.target.closest('select, button, a')) return;
+          const idx = +tr.dataset.logIdx;
+          const entry = appliedLog[idx];
+          if (!entry) return;
+          editingLogIdx = idx;
+          const formRow = pane.querySelector('#ljf-add-job-row');
+          formRow.classList.add('ljf-open');
+          pane.querySelector('#ljf-aj-company').value = entry.company || '';
+          pane.querySelector('#ljf-aj-title').value   = entry.title   || '';
+          pane.querySelector('#ljf-aj-date').value    = entry.date    || '';
+          pane.querySelector('#ljf-aj-status').value  = entry.status  || 'applied';
+          pane.querySelector('#ljf-aj-url').value     = entry.url     || '';
+          pane.querySelectorAll('tbody tr[data-log-idx]').forEach(r => r.classList.remove('ljf-row-editing'));
+          tr.classList.add('ljf-row-editing');
+          pane.querySelector('#ljf-aj-company')?.focus();
+        });
+      });
+    }
 
-    // Add job form toggle — resets to Add mode
+    // Add form toggle — resets to Add mode
     pane.querySelector('#ljf-footer-add')?.addEventListener('click', () => {
       const formRow = pane.querySelector('#ljf-add-job-row');
       const isOpen = formRow.classList.toggle('ljf-open');
       if (isOpen) {
         editingLogIdx = null;
+        editingDismissLogIdx = null;
         pane.querySelector('#ljf-aj-company').value = '';
         pane.querySelector('#ljf-aj-title').value   = '';
         pane.querySelector('#ljf-aj-date').value    = today;
-        pane.querySelector('#ljf-aj-status').value  = 'applied';
-        pane.querySelector('#ljf-aj-url').value     = '';
-        pane.querySelectorAll('tbody tr[data-log-idx]').forEach(r => r.classList.remove('ljf-row-editing'));
+        if (!isDismView) {
+          pane.querySelector('#ljf-aj-status').value = 'applied';
+          pane.querySelector('#ljf-aj-url').value    = '';
+        }
+        const rowSel = isDismView ? 'tbody tr[data-dm-idx]' : 'tbody tr[data-log-idx]';
+        pane.querySelectorAll(rowSel).forEach(r => r.classList.remove('ljf-row-editing'));
         pane.querySelector('#ljf-aj-company')?.focus();
       }
     });
@@ -737,20 +848,29 @@
       const company = pane.querySelector('#ljf-aj-company')?.value.trim();
       const title   = pane.querySelector('#ljf-aj-title')?.value.trim();
       const date    = pane.querySelector('#ljf-aj-date')?.value;
-      const status  = pane.querySelector('#ljf-aj-status')?.value || 'applied';
-      const url     = pane.querySelector('#ljf-aj-url')?.value.trim();
       if (!company || !title || !date) return;
-      if (editingLogIdx !== null && appliedLog[editingLogIdx]) {
-        Object.assign(appliedLog[editingLogIdx], { company, title, date, url, status });
-        editingLogIdx = null;
+      if (isDismView) {
+        if (editingDismissLogIdx !== null && dismissLog[editingDismissLogIdx]) {
+          Object.assign(dismissLog[editingDismissLogIdx], { company, title, date });
+          editingDismissLogIdx = null;
+        } else {
+          dismissLog.push({ jobId: null, company, title, location: '', date });
+        }
+        saveDismissLog();
       } else {
-        appliedLog.push({ company, title, date, url, status, statusDate: today });
+        const status = pane.querySelector('#ljf-aj-status')?.value || 'applied';
+        const url    = pane.querySelector('#ljf-aj-url')?.value.trim();
+        if (editingLogIdx !== null && appliedLog[editingLogIdx]) {
+          Object.assign(appliedLog[editingLogIdx], { company, title, date, url, status });
+          editingLogIdx = null;
+        } else {
+          appliedLog.push({ company, title, date, url, status, statusDate: today });
+        }
+        saveAppliedLog();
       }
-      saveAppliedLog();
       clearHighlights();
       applyAllRules();
       renderJobsPane();
-      // Re-open form for quick multi-entry (Add mode)
       const formRow = pane.querySelector('#ljf-add-job-row');
       if (formRow) {
         formRow.classList.add('ljf-open');
@@ -759,7 +879,8 @@
     }
 
     pane.querySelector('#ljf-aj-add')?.addEventListener('click', submitAddJob);
-    pane.querySelector('#ljf-aj-url')?.addEventListener('keydown', e => {
+    const lastEnterInput = isDismView ? pane.querySelector('#ljf-aj-date') : pane.querySelector('#ljf-aj-url');
+    lastEnterInput?.addEventListener('keydown', e => {
       if (e.key === 'Enter') submitAddJob();
     });
   }
@@ -1288,6 +1409,11 @@
     const date     = localDateStr();
     if (!company && !title) return;
 
+    // Cache identity so undoLogDismissal can read it after LinkedIn collapses the card DOM
+    if (jobId)   card.dataset.ljfLoggedJobId   = jobId;
+    if (company) card.dataset.ljfLoggedCompany = company;
+    if (title)   card.dataset.ljfLoggedTitle   = title;
+
     // Same jobId → update date
     if (jobId) {
       const existing = dismissLog.find(e => e.jobId === jobId);
@@ -1312,6 +1438,25 @@
 
     dismissLog.push({ jobId: jobId || null, company, title, location, date });
     saveDismissLog();
+  }
+
+  function undoLogDismissal(card) {
+    // Prefer cached values set at logDismissal time — card DOM may be collapsed by LinkedIn
+    const jobId   = card.dataset.ljfLoggedJobId   || cardJobId(card);
+    const company = (card.dataset.ljfLoggedCompany || cardText(card, COMPANY_SEL)).toLowerCase();
+    const title   = normalizeSenior(card.dataset.ljfLoggedTitle || cardText(card, TITLE_SEL)).toLowerCase();
+    const before  = dismissLog.length;
+    if (jobId) dismissLog = dismissLog.filter(e => e.jobId !== jobId);
+    if (company || title) {
+      dismissLog = dismissLog.filter(e =>
+        (e.company || '').toLowerCase() !== company ||
+        normalizeSenior(e.title || '').toLowerCase() !== title
+      );
+    }
+    if (dismissLog.length !== before) saveDismissLog();
+    delete card.dataset.ljfLoggedJobId;
+    delete card.dataset.ljfLoggedCompany;
+    delete card.dataset.ljfLoggedTitle;
   }
 
   function actDismissLog(card, entry) {
@@ -1791,7 +1936,8 @@
         const hasUndo    = !!card.querySelector(UNDO_SEL);
         const hasDismiss = !!card.querySelector(DISMISS_SEL);
         if (hasDismiss && !hasUndo) {
-          // Card was manually undismissed — clear all markers so it gets a fresh pass.
+          // Card was undismissed — DOM is restored here so selectors work.
+          undoLogDismissal(card);
           delete card.dataset.ljfDismissed;
           delete card.dataset.ljfRulesApplied;
           delete card.dataset.ljfJobLog;
@@ -3721,6 +3867,7 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
     delete card.dataset.ljfRulesApplied;
     delete card.dataset.ljfJobLog;
     delete card.dataset.ljfJobLogLabel;
+    delete card.dataset.ljfDismissLog;
     card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
     const inner = card.querySelector('.job-card-container');
     if (inner) inner.style.removeProperty('border-left');
@@ -3739,7 +3886,10 @@ function setupApplyCapture() {
       const dismissBtn = e.target.closest(DISMISS_SEL);
       if (dismissBtn) {
         const card = dismissBtn.closest(CARD_SEL);
-        if (card && !isDismissed(card)) logDismissal(card);
+        if (card && !isDismissed(card)) {
+          logDismissal(card);
+          card.dataset.ljfDismissed = '1';
+        }
       }
     }, true);
   }
