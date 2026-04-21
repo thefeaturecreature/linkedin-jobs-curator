@@ -74,6 +74,7 @@ Notable functions in `linkedin-job-filter.js`.
 | `applySavedJobRules()` | Apply rules to saved jobs page cards |
 | `dismissRule(rule)` | Click X on all cards matching a rule |
 | `dismissJobLog()` | Click X on all cards matching an applied log entry |
+| `dismissDismissLog()` | Click X on all cards flagged by the dismiss log (grey or red) |
 | `clearHighlights()` | Remove all script-applied styles and dataset markers from all cards |
 | `reconcileDismissedCards()` | Clear `ljfDismissed` from cards that LinkedIn has since restored |
 

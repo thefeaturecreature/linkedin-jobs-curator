@@ -672,7 +672,7 @@
         const idx = +sel.dataset.logIdx;
         if (!appliedLog[idx]) return;
         appliedLog[idx].status    = sel.value;
-        appliedLog[idx].statusDate = new Date().toISOString().slice(0, 10);
+        appliedLog[idx].statusDate = localDateStr();
         saveAppliedLog();
         const sc = statusStyle(sel.value);
         sel.style.background  = sc.bg;
@@ -808,7 +808,7 @@
   function saveDismissLog() {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - dismissLogExpiry);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const cutoffStr = [cutoff.getFullYear(), String(cutoff.getMonth() + 1).padStart(2, '0'), String(cutoff.getDate()).padStart(2, '0')].join('-');
     dismissLog = dismissLog.filter(e => !e.date || e.date >= cutoffStr);
     GM_setValue(DISMISS_LOG_KEY, JSON.stringify(dismissLog));
     dismissLogIndex = buildDismissLogIndex();
@@ -1186,9 +1186,9 @@
 
   function daysSince(dateStr) {
     if (!dateStr) return null;
-    const d = new Date(dateStr);
+    const d = new Date(dateStr + 'T00:00:00');
     if (isNaN(d)) return null;
-    const diff = Math.round((Date.now() - d.getTime()) / 86400000);
+    const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
     return diff >= 0 ? diff : null;
   }
 
@@ -1287,7 +1287,7 @@
     const company  = cardText(card, COMPANY_SEL);
     const title    = normalizeSenior(cardText(card, TITLE_SEL));
     const location = cardLocationText(card);
-    const date     = new Date().toISOString().slice(0, 10);
+    const date     = localDateStr();
     if (!company && !title) return;
 
     // Same jobId → update date
@@ -1346,7 +1346,7 @@
     card.querySelectorAll('.ljf-badge').forEach(b => b.remove());
     card.style.position = 'relative';
     addBadge(card, '\u2716 dismissed', CC.dismissedBadge);
-    if (hideRecentlyApplied) card.style.display = 'none';
+    card.style.display = hideRecentlyApplied ? 'none' : '';
   }
 
   function dismissJobLog() {
@@ -1357,6 +1357,23 @@
         const btn = card.querySelector(DISMISS_SEL);
         if (btn) {
           logDismissal(card);
+          card.dataset.ljfDismissed = '1';
+          btn.click();
+          markDismissed(card);
+          dismissed++;
+          updateTabCount();
+        }
+      }
+    }
+    return dismissed;
+  }
+
+  function dismissDismissLog() {
+    let dismissed = 0;
+    for (const card of getCards()) {
+      if (card.dataset.ljfDismissLog && !isDismissed(card)) {
+        const btn = card.querySelector(DISMISS_SEL);
+        if (btn) {
           card.dataset.ljfDismissed = '1';
           btn.click();
           markDismissed(card);
@@ -1894,6 +1911,7 @@
         if (!RULE_TYPES[rule.type]?.highlight) dismissed += dismissRule(rule);
       }
       if (jobLogEnabled) dismissed += dismissJobLog();
+      dismissed += dismissDismissLog();
       updateTabCount();
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
     });
@@ -1970,6 +1988,7 @@
       let dismissed = 0;
       for (const rule of rules) dismissed += dismissRule(rule);
       if (jobLogEnabled) dismissed += dismissJobLog();
+      dismissed += dismissDismissLog();
       setStatus('\u2014 ' + dismissed + ' card(s) dismissed.');
     });
 
@@ -3048,7 +3067,7 @@
   }
 
   function downloadLogCsvTemplate() {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateStr();
     const samples = [
       ['Acme Corp',    'Software Engineer', today, 'applied',      '',      'https://www.linkedin.com/jobs/view/123456789', ''],
       ['Beta Inc',     'Senior Engineer',   today, 'interviewing', today,   'https://www.linkedin.com/jobs/view/234567890', 'Phone screen done'],
@@ -3357,6 +3376,11 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
     el.textContent = dismissLog.length ? dismissLog.length + ' dismissed' : '';
   }
 
+  function localDateStr() {
+    const d = new Date();
+    return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+  }
+
   function escHtml(s) {
     return String(s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -3533,7 +3557,7 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
       ? 'https://www.linkedin.com/jobs/view/' + jobIdM[1] + '/'
       : window.location.href;
 
-    const date = new Date().toISOString().slice(0, 10);
+    const date = localDateStr();
 
     const dup = appliedLog.find(e =>
       e.company.toLowerCase() === company.toLowerCase() &&
@@ -3616,7 +3640,7 @@ function setupApplyCapture() {
       return;
     }
 
-    const date = new Date().toISOString().slice(0, 10);
+    const date = localDateStr();
     appliedLog.push({ company, title, date, url });
     saveAppliedLog();
     clearHighlights();
