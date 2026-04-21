@@ -30,6 +30,7 @@ Notable functions in `linkedin-job-filter.js`.
 | `buildDismissLogIndex()` | Build Map with `id:<jobId>` and `ct:<company>\x00<title>` keys |
 | `matchDismissLog(card)` | Find dismiss log entry for a card (jobId first, then company+title) |
 | `logDismissal(card)` | Add/update dismiss log entry for a card |
+| `undoLogDismissal(card)` | Remove dismiss log entry for a card (called on undo) |
 | `actDismissLog(card, entry)` | Apply grey (or red) tint + badge to a previously-dismissed card |
 | `applyDismissLog()` | Run `matchDismissLog`/`actDismissLog` on all cards |
 
@@ -98,7 +99,7 @@ Notable functions in `linkedin-job-filter.js`.
 | `updateTabCount()` | Update red/green/yellow pill counts on the side tab |
 | `updateDismissLogCount()` | Update dismiss log count display in the status bar |
 | `renderRules()` | Re-render the rules panel pane |
-| `renderJobsPane()` | Re-render the jobs log pane |
+| `renderJobsPane()` | Re-render the jobs pane; toggles between applied log and dismiss log views via `activeLogView` |
 | `openSettingsModal()` | Open settings/backup modal dialog |
 | `openOnboardingModal()` | Show first-run onboarding modal |
 | `setStatus(msg)` | Set panel status bar message |
