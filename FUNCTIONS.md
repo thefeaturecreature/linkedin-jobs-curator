@@ -33,6 +33,14 @@ Notable functions in `linkedin-job-filter.js`.
 | `actDismissLog(card, entry)` | Apply grey (or red) tint + badge to a previously-dismissed card |
 | `applyDismissLog()` | Run `matchDismissLog`/`actDismissLog` on all cards |
 
+## Color Management
+| Function | Description |
+|---|---|
+| `hexToRgb(hex)` | Parse hex color string to `[r, g, b]` array |
+| `rowTint(hex, alpha)` | Return `rgba(...)` string from a hex color and alpha, for panel row tints |
+| `buildCC(colors)` | Build the `CC` overlay-color object from a `userColors`-shaped input |
+| `saveColors()` | Persist `userColors` to GM storage |
+
 ## Card Helpers
 | Function | Description |
 |---|---|

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.5.0
+// @version      1.5.1
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -62,30 +62,23 @@
   // ─── Semantic card-overlay colors ─────────────────────────────────────────────
   // Applied as transparent RGBA over LinkedIn's own card backgrounds.
   // Single set — LinkedIn handles its own dark/light theming for the base card.
-  const CC = {
-    // Dismiss (red)
-    dismissBg:       'rgba(200,40,40,0.10)',
-    dismissBorder:   'rgba(200,40,40,0.55)',
-    dismissBadge:    'rgba(180,30,30,0.80)',
-    // Highlight (green)
-    highlightBg:     'rgba(40,180,40,0.11)',
-    highlightBorder: 'rgba(40,180,40,0.55)',
-    highlightBadge:  'rgba(30,150,30,0.82)',
-    // Job log — recent company match (yellow)
-    recentBg:        'rgba(200,170,0,0.13)',
-    recentBorder:    'rgba(200,170,0,0.60)',
-    recentBadge:     'rgba(160,130,0,0.88)',
-    // Dismissed/undo state (orange)
-    dismissedBg:     'rgba(200,120,0,0.12)',
-    dismissedBorder: 'rgba(200,120,0,0.55)',
-    dismissedBadge:  'rgba(180,100,0,0.85)',
-    // Previously dismissed log card (grey tint)
-    prevDismissedBg:     'rgba(100,100,110,0.10)',
-    prevDismissedBorder: 'rgba(100,100,110,0.45)',
-    prevDismissedBadge:  'rgba(80,80,90,0.82)',
-    // Old company-label badge (gray, no card tint)
-    staleBadge:      'rgba(80,80,90,0.72)',
+  const COLOR_DEFAULTS = {
+    dismiss:    '#c82828',
+    highlight:  '#28b428',
+    recent:     '#c8aa00',
+    dismissed:  '#c87800',
+    dismissLog: '#64646e',
   };
+
+  const ROLE_ALPHAS = {
+    dismiss:    { bg: 0.10, border: 0.55, badge: 0.80 },
+    highlight:  { bg: 0.11, border: 0.55, badge: 0.82 },
+    recent:     { bg: 0.13, border: 0.60, badge: 0.88 },
+    dismissed:  { bg: 0.12, border: 0.55, badge: 0.85 },
+    dismissLog: { bg: 0.10, border: 0.45, badge: 0.82 },
+  };
+
+  let CC = buildCC(COLOR_DEFAULTS);
 
   const THEMES = {
     dark: {
@@ -171,6 +164,11 @@
   let dismissLogExpiry      = Math.max(1, parseInt(GM_getValue('ljf_dismissLogExpiry', '180'), 10) || 180);
   let dismissLogMatchLocation = GM_getValue('ljf_dismissLogMatchLocation', 'false') === 'true';
   let dismissLogCardsRed    = GM_getValue('ljf_dismissLogCardsRed', 'false') === 'true';
+  let userColors = (() => {
+    try { return { ...COLOR_DEFAULTS, ...JSON.parse(GM_getValue('ljf_colors', '{}')) }; }
+    catch (e) { return { ...COLOR_DEFAULTS }; }
+  })();
+  CC = buildCC(userColors);
 
   function t() { return darkMode ? THEMES.dark : THEMES.light; }
 
@@ -401,9 +399,9 @@
       '--ljf-form-bg':            th.formBg,
       '--ljf-status-bg':          th.statusBg,
       '--ljf-row-bg':             darkMode ? '#1c1c1c' : '#fff',
-      '--ljf-dim-row-bg':         th.dimRowBg,
-      '--ljf-hi-row-bg':          th.hiRowBg,
-      '--ljf-log-row-bg':         th.logRowBg,
+      '--ljf-dim-row-bg':         rowTint(userColors.dismiss,    darkMode ? 0.10 : 0.07),
+      '--ljf-hi-row-bg':          rowTint(userColors.highlight,  darkMode ? 0.10 : 0.07),
+      '--ljf-log-row-bg':         rowTint(userColors.recent,     darkMode ? 0.10 : 0.09),
       '--ljf-salary-off-bg':      th.salaryOffBg,
       '--ljf-input-bg':           th.inputBg,
       '--ljf-dismiss-bg':         th.dismissBg,
@@ -433,9 +431,9 @@
       '--ljf-border2':            th.border2,
       '--ljf-border3':            th.border3,
       '--ljf-row-border':         th.rowBorder,
-      '--ljf-dim-row-border':     th.dimRowBorder,
-      '--ljf-hi-row-border':      th.hiRowBorder,
-      '--ljf-log-row-border':     th.logRowBorder,
+      '--ljf-dim-row-border':     rowTint(userColors.dismiss,    darkMode ? 0.38 : 0.32),
+      '--ljf-hi-row-border':      rowTint(userColors.highlight,  darkMode ? 0.38 : 0.32),
+      '--ljf-log-row-border':     rowTint(userColors.recent,     darkMode ? 0.35 : 0.38),
       '--ljf-salary-off-border':  th.salaryOffBorder,
       '--ljf-input-border':       th.inputBorder,
       '--ljf-tab-accent':         th.tabAccent,
@@ -2378,7 +2376,7 @@
     header.appendChild(closeBtn);
 
     // ── Tab bar ───────────────────────────────────────────────────────────────
-    const TABS = ['Settings', 'Backup'];
+    const TABS = ['Settings', 'Colors', 'Backup'];
     let activeTab = 'Settings';
 
     const tabBar = document.createElement('div');
@@ -2429,12 +2427,92 @@
 
     function renderContent() {
       content.innerHTML = '';
-      if (activeTab === 'Settings') {
-        const divider = () => {
-          const d = document.createElement('div');
-          d.style.cssText = `border-top:1px solid ${th.border2};margin:2px 0;`;
-          return d;
-        };
+      const divider = () => {
+        const d = document.createElement('div');
+        d.style.cssText = `border-top:1px solid ${th.border2};margin:2px 0;`;
+        return d;
+      };
+      if (activeTab === 'Colors') {
+        const COLOR_LABELS = [
+          ['dismiss',    'Dismiss'],
+          ['highlight',  'Highlight'],
+          ['recent',     'Recently applied'],
+          ['dismissed',  'Dismissed'],
+          ['dismissLog', 'Prev dismissed'],
+        ];
+        function makePreviewBox(hex, bgCard, key) {
+          const alphas   = ROLE_ALPHAS[key] || { bg: 0.10, border: 0.55 };
+          const [r, g, b] = hexToRgb(hex);
+          const isDark   = bgCard === '#1b1b1b';
+          const textColor = isDark ? '#e0e0e0' : '#111';
+          const outer = document.createElement('div');
+          outer.style.cssText = `width:48px;height:24px;border-radius:3px;background:${bgCard};overflow:hidden;flex-shrink:0;`;
+          const inner = document.createElement('div');
+          inner.style.cssText = `width:100%;height:100%;background:rgba(${r},${g},${b},${alphas.bg});border-left:3px solid rgba(${r},${g},${b},${alphas.border});display:flex;align-items:center;padding-left:4px;box-sizing:border-box;`;
+          const lbl = document.createElement('span');
+          lbl.style.cssText = `font-size:8px;line-height:1;color:${textColor};font-family:-apple-system,BlinkMacSystemFont,sans-serif;`;
+          lbl.textContent = isDark ? 'Dark' : 'Light';
+          inner.appendChild(lbl);
+          outer.appendChild(inner);
+          return { wrap: outer, inner };
+        }
+
+        for (const [key, label] of COLOR_LABELS) {
+          const inp = document.createElement('input');
+          inp.type  = 'color';
+          inp.value = userColors[key];
+          inp.style.cssText = 'width:32px;height:24px;border:none;padding:0;cursor:pointer;border-radius:4px;background:none;flex-shrink:0;-webkit-appearance:none;appearance:none;outline:none;';
+
+          const darkPreview  = makePreviewBox(userColors[key], '#1b1b1b', key);
+          const lightPreview = makePreviewBox(userColors[key], '#ffffff', key);
+
+          const previews = document.createElement('div');
+          previews.style.cssText = 'display:flex;gap:4px;align-items:flex-end;flex-shrink:0;pointer-events:none;';
+          previews.appendChild(darkPreview.wrap);
+          previews.appendChild(lightPreview.wrap);
+
+          const control = document.createElement('div');
+          control.style.cssText = 'display:flex;align-items:center;gap:8px;';
+          control.appendChild(previews);
+          control.appendChild(inp);
+
+          inp.addEventListener('input', () => {
+            userColors[key] = inp.value;
+            const [r, g, b] = hexToRgb(inp.value);
+            const alphas = ROLE_ALPHAS[key] || { bg: 0.10, border: 0.55 };
+            const bg     = `rgba(${r},${g},${b},${alphas.bg})`;
+            const border = `rgba(${r},${g},${b},${alphas.border})`;
+            for (const preview of [darkPreview, lightPreview]) {
+              preview.inner.style.background  = bg;
+              preview.inner.style.borderLeft  = `3px solid ${border}`;
+            }
+            saveColors();
+            CC = buildCC(userColors);
+            setPanelVars();
+            clearHighlights();
+            applyAllRules();
+          });
+          content.appendChild(mkRow(label, control));
+          content.appendChild(divider());
+        }
+        const restoreBtn = document.createElement('button');
+        restoreBtn.textContent = 'Restore Defaults';
+        restoreBtn.style.cssText = [
+          `background:${th.rowBg}`, `color:${th.ruleType}`,
+          `border:1px solid ${th.rowBorder}`, 'border-radius:4px',
+          'padding:6px 12px', 'cursor:pointer', 'font-size:11px', 'margin-top:6px',
+        ].join(';');
+        restoreBtn.addEventListener('click', () => {
+          userColors = { ...COLOR_DEFAULTS };
+          saveColors();
+          CC = buildCC(userColors);
+          setPanelVars();
+          clearHighlights();
+          applyAllRules();
+          renderContent();
+        });
+        content.appendChild(restoreBtn);
+      } else if (activeTab === 'Settings') {
         content.appendChild(mkRow('Dark Mode', mkToggle(darkMode, checked => {
           if (checked !== darkMode) { overlay.remove(); toggleDarkMode(); }
         })));
@@ -2678,6 +2756,7 @@
       darkMode:      darkMode ? 'dark' : 'light',
       jobLogEnabled: jobLogEnabled,
       reapplyDays:   reapplyDays,
+      colors:        userColors,
       rules:         rules,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -2713,7 +2792,7 @@
             setStatus('\u26A0 No rules found in file.');
             return;
           }
-          showImportDialog(data.rules, data.darkMode, data.jobLogEnabled, data.reapplyDays);
+          showImportDialog(data.rules, data.darkMode, data.jobLogEnabled, data.reapplyDays, data.colors);
         } catch (e) {
           setStatus('\u26A0 Invalid rules file: ' + e.message);
         }
@@ -2741,7 +2820,7 @@
     });
   }
 
-  function showImportDialog(incoming, importedDarkMode, importedJobLogEnabled, importedReapplyDays) {
+  function showImportDialog(incoming, importedDarkMode, importedJobLogEnabled, importedReapplyDays, importedColors) {
     const th = t();
     const overlay = document.createElement('div');
     overlay.style.cssText = [
@@ -2800,6 +2879,11 @@
       if (typeof importedReapplyDays === 'number' && importedReapplyDays >= 1) {
         reapplyDays = importedReapplyDays;
         GM_setValue('ljf_reapplyDays', String(reapplyDays));
+      }
+      if (importedColors && typeof importedColors === 'object' && !Array.isArray(importedColors)) {
+        userColors = { ...COLOR_DEFAULTS, ...importedColors };
+        saveColors();
+        CC = buildCC(userColors);
       }
     };
 
@@ -3379,6 +3463,47 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
   function localDateStr() {
     const d = new Date();
     return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+  }
+
+  function rowTint(hex, alpha) {
+    const [r, g, b] = hexToRgb(hex);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function hexToRgb(hex) {
+    const n = parseInt(hex.replace('#', ''), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function buildCC(colors) {
+    function role(hex, a) {
+      const [r, g, b] = hexToRgb(hex);
+      const dr = Math.round(r * 0.85), dg = Math.round(g * 0.85), db = Math.round(b * 0.85);
+      return {
+        bg:     `rgba(${r},${g},${b},${a.bg})`,
+        border: `rgba(${r},${g},${b},${a.border})`,
+        badge:  `rgba(${dr},${dg},${db},${a.badge})`,
+      };
+    }
+    const dm = role(colors.dismiss,    ROLE_ALPHAS.dismiss);
+    const hi = role(colors.highlight,  ROLE_ALPHAS.highlight);
+    const rc = role(colors.recent,     ROLE_ALPHAS.recent);
+    const di = role(colors.dismissed,  ROLE_ALPHAS.dismissed);
+    const dl = role(colors.dismissLog, ROLE_ALPHAS.dismissLog);
+    const [dlr, dlg, dlb] = hexToRgb(colors.dismissLog);
+    const dldr = Math.round(dlr * 0.85), dldg = Math.round(dlg * 0.85), dldb = Math.round(dlb * 0.85);
+    return {
+      dismissBg: dm.bg, dismissBorder: dm.border, dismissBadge: dm.badge,
+      highlightBg: hi.bg, highlightBorder: hi.border, highlightBadge: hi.badge,
+      recentBg: rc.bg, recentBorder: rc.border, recentBadge: rc.badge,
+      dismissedBg: di.bg, dismissedBorder: di.border, dismissedBadge: di.badge,
+      prevDismissedBg: dl.bg, prevDismissedBorder: dl.border, prevDismissedBadge: dl.badge,
+      staleBadge: `rgba(${dldr},${dldg},${dldb},0.72)`,
+    };
+  }
+
+  function saveColors() {
+    GM_setValue('ljf_colors', JSON.stringify(userColors));
   }
 
   function escHtml(s) {
