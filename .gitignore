@@ -3,3 +3,4 @@
 .claude-assistant
 *.local
 samples
+.mcp
