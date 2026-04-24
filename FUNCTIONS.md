@@ -29,7 +29,8 @@ Notable functions in `linkedin-job-filter.js`.
 | `saveDismissLog()` | Persist dismiss log, prune expired entries, rebuild index |
 | `buildDismissLogIndex()` | Build Map with `id:<jobId>` and `ct:<company>\x00<title>` keys |
 | `matchDismissLog(card)` | Find dismiss log entry for a card (jobId first, then company+title) |
-| `logDismissal(card)` | Add/update dismiss log entry for a card |
+| `logDismissal(card)` | Add/update dismiss log entry for a card; calls `refreshDismissUI` on save |
+| `refreshDismissUI()` | Update dismiss log count badge and re-render the dismiss log pane if it's open |
 | `undoLogDismissal(card)` | Remove dismiss log entry for a card (called on undo) |
 | `actDismissLog(card, entry)` | Apply grey (or red) tint + badge to a previously-dismissed card |
 | `applyDismissLog()` | Run `matchDismissLog`/`actDismissLog` on all cards |
@@ -45,6 +46,7 @@ Notable functions in `linkedin-job-filter.js`.
 ## Card Helpers
 | Function | Description |
 |---|---|
+| `cacheCardIdentity(card)` | Cache company/title/jobId/location on card dataset so `logDismissal` can read them after LinkedIn collapses the DOM |
 | `cardText(card, sel)` | Extract text content from first matching element in card |
 | `cardJobId(card)` | Extract LinkedIn job ID from card title link href |
 | `cardLocationText(card)` | Extract non-salary metadata text (location) from card |
@@ -86,6 +88,7 @@ Notable functions in `linkedin-job-filter.js`.
 | `dismissDismissLog()` | Click X on all cards flagged by the dismiss log (grey or red) |
 | `clearHighlights()` | Remove all script-applied styles and dataset markers from all cards |
 | `reconcileDismissedCards()` | Clear `ljfDismissed` from cards that LinkedIn has since restored |
+| `captureBypassedDismissals(mutations)` | Detect dismissals bypassing the click handler by scanning childList added nodes AND attribute mutations (classList.add) for `.job-card-list--is-dismissed` |
 
 ## UI
 | Function | Description |

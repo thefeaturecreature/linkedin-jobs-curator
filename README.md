@@ -2,6 +2,10 @@
 
 A Violentmonkey/Greasemonkey userscript for LinkedIn job search. Rule-based filtering, highlights, dismissals, and an application log that automatically flags companies you've already applied to.
 
+## Browser compatibility
+
+**Firefox only.** This script does not work in Chrome. LinkedIn's anti-automation protections block the DOM access the script relies on in Chromium-based browsers, and working around those protections risks account suspension — so Chrome support is intentionally out of scope.
+
 ## Installation
 
 1. Install [Violentmonkey](https://violentmonkey.github.io/) (recommended), [Tampermonkey](https://www.tampermonkey.net/), or [Greasemonkey](https://addons.mozilla.org/en-US/firefox/addon/greasemonkey/).
