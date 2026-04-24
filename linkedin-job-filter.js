@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.6.0
+// @version      1.6.1
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -1191,10 +1191,27 @@ ${addFormHtml}
     card.appendChild(badge);
   }
 
+  // Cache company/title/jobId/location on the card element so logDismissal can
+  // read them after LinkedIn collapses the card DOM on dismiss.
+  function cacheCardIdentity(card) {
+    if (card.dataset.ljfCardCached) return;
+    const jobId    = cardJobId(card);
+    const company  = cardText(card, COMPANY_SEL);
+    const title    = normalizeSenior(cardText(card, TITLE_SEL));
+    const location = cardLocationText(card);
+    if (!company && !title) return;
+    if (jobId)    card.dataset.ljfCardJobId    = jobId;
+    if (company)  card.dataset.ljfCardCompany  = company;
+    if (title)    card.dataset.ljfCardTitle    = title;
+    if (location) card.dataset.ljfCardLocation = location;
+    card.dataset.ljfCardCached = '1';
+  }
+
   // Apply all rules to one card, stacking a badge per matching rule.
   // Returns the number of rules that matched.
   function applyCardRules(card) {
     if (isDismissed(card)) { markDismissed(card); return 0; }
+    cacheCardIdentity(card);
     if (card.dataset.ljfRulesApplied) {
       // Re-enforce color in case the SPA re-rendered and cleared inline styles.
       if (card.dataset.ljfHighlighted) {
@@ -1408,11 +1425,16 @@ ${addFormHtml}
     return entries.find(e => (e.location || '').toLowerCase() === loc) || null;
   }
 
+  function refreshDismissUI() {
+    updateDismissLogCount();
+    if (panelOpen && activePanel === 'jobs' && activeLogView === 'dismissed') renderJobsPane();
+  }
+
   function logDismissal(card) {
-    const jobId    = cardJobId(card);
-    const company  = cardText(card, COMPANY_SEL);
-    const title    = normalizeSenior(cardText(card, TITLE_SEL));
-    const location = cardLocationText(card);
+    const jobId    = cardJobId(card)    || card.dataset.ljfCardJobId    || null;
+    const company  = cardText(card, COMPANY_SEL)  || card.dataset.ljfCardCompany  || '';
+    const title    = normalizeSenior(cardText(card, TITLE_SEL) || card.dataset.ljfCardTitle || '');
+    const location = cardLocationText(card) || card.dataset.ljfCardLocation || '';
     const date     = localDateStr();
     if (!company && !title) return;
 
@@ -1424,7 +1446,7 @@ ${addFormHtml}
     // Same jobId → update date
     if (jobId) {
       const existing = dismissLog.find(e => e.jobId === jobId);
-      if (existing) { existing.date = date; saveDismissLog(); return; }
+      if (existing) { existing.date = date; saveDismissLog(); refreshDismissUI(); return; }
     }
 
     // Same company+title → update if location matches (or setting off), else new entry
@@ -1438,13 +1460,13 @@ ${addFormHtml}
       if (!dismissLogMatchLocation || (match.location || '').toLowerCase() === location.toLowerCase()) {
         match.date = date;
         if (jobId && !match.jobId) match.jobId = jobId;
-        saveDismissLog();
+        saveDismissLog(); refreshDismissUI();
         return;
       }
     }
 
     dismissLog.push({ jobId: jobId || null, company, title, location, date });
-    saveDismissLog();
+    saveDismissLog(); refreshDismissUI();
   }
 
   function undoLogDismissal(card) {
@@ -1460,7 +1482,7 @@ ${addFormHtml}
         normalizeSenior(e.title || '').toLowerCase() !== title
       );
     }
-    if (dismissLog.length !== before) saveDismissLog();
+    if (dismissLog.length !== before) { saveDismissLog(); refreshDismissUI(); }
     delete card.dataset.ljfLoggedJobId;
     delete card.dataset.ljfLoggedCompany;
     delete card.dataset.ljfLoggedTitle;
@@ -1852,7 +1874,11 @@ ${addFormHtml}
     const greenEl = document.getElementById('ljf-tab-count-green');
 
     if (pill && countEl) {
-      const n = cards.filter(c => (c.dataset.ljfHighlighted || (c.dataset.ljfJobLog && !c.dataset.ljfJobLogLabel) || c.dataset.ljfDismissLog === 'red') && !isDismissed(c)).length;
+      const n = cards.filter(c => {
+        const dismissed = isDismissed(c);
+        return (!dismissed && (c.dataset.ljfHighlighted || (c.dataset.ljfJobLog && !c.dataset.ljfJobLogLabel) || c.dataset.ljfDismissLog === 'red'))
+          || (dismissed && dismissLogCardsRed);
+      }).length;
       if (n > 0) {
         countEl.textContent = n;
         pill.style.display = 'flex';
@@ -1886,11 +1912,11 @@ ${addFormHtml}
     const yellowCountEl = document.getElementById('ljf-tab-count-yellow');
     const eyeBtn        = document.getElementById('ljf-tab-hide-recent');
     if (yellowPill && yellowCountEl) {
-      const n = cards.filter(c =>
-        (c.dataset.ljfJobLog && c.dataset.ljfJobLogLabel) ||
-        c.dataset.ljfDismissed ||
-        c.dataset.ljfDismissLog === 'grey'
-      ).length;
+      const n = cards.filter(c => {
+        const dismissed = isDismissed(c);
+        return (!dismissed && ((c.dataset.ljfJobLog && c.dataset.ljfJobLogLabel) || c.dataset.ljfDismissLog === 'grey'))
+          || (dismissed && !dismissLogCardsRed);
+      }).length;
       if (n > 0) {
         yellowCountEl.textContent = n;
         yellowPill.style.display = 'flex';
@@ -1940,6 +1966,10 @@ ${addFormHtml}
   function reconcileDismissedCards() {
     for (const card of getCards()) {
       if (card.dataset.ljfDismissed) {
+        // If LinkedIn's own dismissed class is present the card is still dismissed — the undo
+        // button shares the job-card-container__action class with DISMISS_SEL, so hasDismiss
+        // would be true even on a freshly-dismissed card. Skip it.
+        if (card.querySelector('.job-card-list--is-dismissed')) continue;
         const hasUndo    = !!card.querySelector(UNDO_SEL);
         const hasDismiss = !!card.querySelector(DISMISS_SEL);
         if (hasDismiss && !hasUndo) {
@@ -1961,12 +1991,45 @@ ${addFormHtml}
 
   // ─── MutationObserver ─────────────────────────────────────────────────────────
 
+  // Detect dismissals that bypassed click capture (e.g. "Not interested" overflow menu).
+  // LinkedIn adds .job-card-list--is-dismissed to an inner element when a card is dismissed.
+  // We check added nodes in each mutation batch so we catch it before the card text is gone.
+  function captureBypassedDismissals(mutations) {
+    for (const mut of mutations) {
+      if (mut.type === 'childList') {
+        for (const node of mut.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          const targets = node.classList?.contains('job-card-list--is-dismissed')
+            ? [node]
+            : [...node.querySelectorAll('.job-card-list--is-dismissed')];
+          for (const el of targets) {
+            const card = el.closest(CARD_SEL) || (el.matches && el.matches(CARD_SEL) ? el : null);
+            if (!card || card.dataset.ljfDismissed) continue;
+            logDismissal(card);
+            card.dataset.ljfDismissed = '1';
+            updateTabCount();
+          }
+        }
+      } else if (mut.type === 'attributes') {
+        // LinkedIn may add .job-card-list--is-dismissed via classList.add (attribute mutation)
+        const el = mut.target;
+        if (el.nodeType !== 1 || !el.classList?.contains('job-card-list--is-dismissed')) continue;
+        const card = el.closest(CARD_SEL) || (el.matches && el.matches(CARD_SEL) ? el : null);
+        if (!card || card.dataset.ljfDismissed) continue;
+        logDismissal(card);
+        card.dataset.ljfDismissed = '1';
+        updateTabCount();
+      }
+    }
+  }
+
   let scanTimeout = null;
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver(mutations => {
+    captureBypassedDismissals(mutations);
     clearTimeout(scanTimeout);
     scanTimeout = setTimeout(() => { reconcileDismissedCards(); applyAllRules(); }, 700);
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
 
   // ─── UI ───────────────────────────────────────────────────────────────────────
 
@@ -3896,6 +3959,18 @@ function setupApplyCapture() {
         if (card && !isDismissed(card)) {
           logDismissal(card);
           card.dataset.ljfDismissed = '1';
+          updateTabCount();
+        } else if (!card) {
+          // Dismissed from the job detail panel — the button has no card ancestor.
+          // Locate the matching list card by the job ID in the URL.
+          const jobId = new URLSearchParams(window.location.search).get('currentJobId');
+          const link = jobId ? document.querySelector('a[href*="/jobs/view/' + jobId + '"]') : null;
+          const listCard = link ? link.closest(CARD_SEL) : null;
+          if (listCard && !isDismissed(listCard)) {
+            logDismissal(listCard);
+            listCard.dataset.ljfDismissed = '1';
+            updateTabCount();
+          }
         }
       }
     }, true);
