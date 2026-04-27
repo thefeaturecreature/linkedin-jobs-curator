@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.6.2
+// @version      1.6.4
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -181,7 +181,8 @@
 
   function buildPanelStyles() {
     let el = document.getElementById('ljf-styles');
-    if (!el) { el = document.createElement('style'); el.id = 'ljf-styles'; document.head.appendChild(el); }
+    if (!el) { el = document.createElement('style'); el.id = 'ljf-styles'; }
+    if (!el.isConnected) { (document.head || document.documentElement).appendChild(el); }
     el.textContent = `
 /* LinkedIn Job Filter — all selectors scoped to #ljf-panel */
 #ljf-panel .ljf-header {
@@ -528,148 +529,289 @@
       return jobSort.dir === 'asc' ? ai - bi : bi - ai;
     });
 
-    const magSvg = `<svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4"/><line x1="10" y1="10" x2="14" y2="14"/></svg>`;
-    const headerCells = COLS.map(col => {
-      const active = jobSort.col === col;
-      const sortable = SORTABLE.has(col);
-      const arrow = active ? (jobSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-      const cls = [
-        active   ? 'ljf-sort-active' : '',
-        sortable ? 'ljf-sortable'    : '',
-        col === 'days' ? 'ljf-center' : '',
-      ].filter(Boolean).join(' ');
-      const filterBtn = col === 'company'
-        ? `<button class="ljf-co-filter-btn${companyFilter || companyFilterOpen ? ' ljf-co-filter-active' : ''}" title="Filter by company">${magSvg}</button>`
-        : '';
-      return `<th data-sort="${col}" class="${cls}" style="width:${WIDTHS[col]};">
-        ${LABELS[col]}${arrow ? `<span class="ljf-sort-arrow">${arrow}</span>` : ''}${filterBtn}
-      </th>`;
-    }).join('');
-
     const STATUS_OPTIONS = ['applied','interviewing','offer','rejected','closed','withdrawn'];
     const _now = new Date();
     const today = [_now.getFullYear(), String(_now.getMonth() + 1).padStart(2, '0'), String(_now.getDate()).padStart(2, '0')].join('-');
     const companies = [...new Set(dataLog.map(e => e.company).filter(Boolean))].sort();
     const titles    = [...new Set(dataLog.map(e => e.title).filter(Boolean))].sort();
-    const coOptions = companies.map(c => `<option value="${escHtml(c)}">`).join('');
-    const tiOptions = titles.map(ti => `<option value="${escHtml(ti)}">`).join('');
 
-    let rows;
-    if (indexed.length === 0) {
-      rows = `<tr><td colspan="${colCount}" class="ljf-jobs-empty">${isDismView ? 'No dismissed jobs logged yet.' : 'No applications logged yet.'}</td></tr>`;
-    } else if (isDismView) {
-      rows = indexed.map(({ e: entry, i: logIdx }) => {
-        const company  = entry.company  || '—';
-        const title    = entry.title    || '—';
-        const location = entry.location || '';
-        const dateStr  = entry.date     || '';
-        return `<tr data-dm-idx="${logIdx}" data-company="${escHtml(company.toLowerCase())}">
-          <td class="ljf-col-trunc" title="${escHtml(company)}">${escHtml(company)}</td>
-          <td class="ljf-col-trunc" title="${escHtml(title)}">${escHtml(title)}</td>
-          <td class="ljf-col-trunc ljf-col-muted" title="${escHtml(location)}">${escHtml(location) || '—'}</td>
-          <td class="ljf-col-muted">${escHtml(dateStr) || '—'}</td>
-          <td class="ljf-col-muted ljf-center">${daysAgo(dateStr)}</td>
-          <td class="ljf-col-icon">
-            <button class="ljf-log-del" data-dm-idx="${logIdx}" title="Delete entry">✕</button>
-          </td>
-        </tr>`;
-      }).join('');
-    } else {
-      rows = indexed.map(({ e: entry, i: logIdx }) => {
-        const status  = entry.status || 'applied';
-        const sc      = statusStyle(status);
-        const company = entry.company || '—';
-        const title   = entry.title   || '—';
-        const url     = entry.url     || '';
-        const dateStr = entry.date    || '';
-        const opts    = STATUS_OPTIONS.map(s =>
-          `<option value="${s}"${s === status ? ' selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
-        ).join('');
-        const liIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" focusable="false" class="ljf-li-icon">
-          <path d="M15 2v12a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1h12a1 1 0 011 1zM5 6H3v7h2zm.25-2A1.25 1.25 0 104 5.25 1.25 1.25 0 005.25 4zM13 9.29c0-2.2-.73-3.49-2.86-3.49A2.71 2.71 0 007.89 7V6H6v7h2V9.73a1.73 1.73 0 011.52-1.92h.14C10.82 7.8 11 8.94 11 9.73V13h2z" fill="#0a66c2"></path>
-        </svg>`;
-        return `<tr data-log-idx="${logIdx}" data-company="${escHtml(company.toLowerCase())}">
-          <td class="ljf-col-trunc ljf-co-cell" data-company="${escHtml(company)}" title="${escHtml(company)}">${escHtml(company)}</td>
-          <td class="ljf-col-trunc" title="${escHtml(title)}">${escHtml(title)}</td>
-          <td class="ljf-col-muted">${escHtml(dateStr) || '—'}</td>
-          <td class="ljf-col-muted ljf-center">${daysAgo(dateStr)}</td>
-          <td style="padding:1px 3px;">
-            <select class="ljf-status-sel" data-log-idx="${logIdx}" style="background:${sc.bg};color:${sc.text};">
-              ${opts}
-            </select>
-          </td>
-          <td class="ljf-col-icon">
-            ${url ? `<a href="${escHtml(url)}" target="_blank" rel="noopener" class="ljf-li-link" title="Open listing">${liIcon}</a>` : ''}
-          </td>
-          <td class="ljf-col-icon">
-            <button class="ljf-log-del" data-log-idx="${logIdx}" title="Delete entry">✕</button>
-          </td>
-        </tr>`;
-      }).join('');
+    function mk(tag, id, cls) {
+      const el = document.createElement(tag);
+      if (id)  el.id        = id;
+      if (cls) el.className = cls;
+      return el;
     }
 
-    // Footer toggle
+    // Datalists
+    const coList = mk('datalist', 'ljf-co-list');
+    companies.forEach(c => { const o = document.createElement('option'); o.value = c; coList.appendChild(o); });
+    const tiList = mk('datalist', 'ljf-ti-list');
+    titles.forEach(ti => { const o = document.createElement('option'); o.value = ti; tiList.appendChild(o); });
+
+    // Table
+    const scrollDiv = mk('div', null, 'ljf-jobs-scroll');
+    const table = mk('table', null, 'ljf-jobs-table');
+    const thead = document.createElement('thead');
+
+    // Header row — each th is fresh, innerHTML is safe
+    const headerTr = document.createElement('tr');
+    for (const col of COLS) {
+      const active   = jobSort.col === col;
+      const sortable = SORTABLE.has(col);
+      const arrow    = active ? (jobSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+      const th = document.createElement('th');
+      th.dataset.sort = col;
+      th.style.width = WIDTHS[col];
+      const clsParts = [active ? 'ljf-sort-active' : '', sortable ? 'ljf-sortable' : '', col === 'days' ? 'ljf-center' : ''].filter(Boolean);
+      if (clsParts.length) th.className = clsParts.join(' ');
+      th.appendChild(document.createTextNode(LABELS[col]));
+      if (arrow) {
+        const arrowSpan = document.createElement('span');
+        arrowSpan.className = 'ljf-sort-arrow';
+        arrowSpan.textContent = arrow;
+        th.appendChild(arrowSpan);
+      }
+      if (col === 'company') {
+        const filterBtn = document.createElement('button');
+        filterBtn.className = 'ljf-co-filter-btn' + (companyFilter || companyFilterOpen ? ' ljf-co-filter-active' : '');
+        filterBtn.title = 'Filter by company';
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const fbSvg = document.createElementNS(svgNS, 'svg');
+        fbSvg.setAttribute('viewBox', '0 0 16 16'); fbSvg.setAttribute('width', '9'); fbSvg.setAttribute('height', '9');
+        fbSvg.setAttribute('fill', 'none'); fbSvg.setAttribute('stroke', 'currentColor');
+        fbSvg.setAttribute('stroke-width', '1.8'); fbSvg.setAttribute('stroke-linecap', 'round');
+        const fbCircle = document.createElementNS(svgNS, 'circle');
+        fbCircle.setAttribute('cx', '6.5'); fbCircle.setAttribute('cy', '6.5'); fbCircle.setAttribute('r', '4');
+        const fbLine = document.createElementNS(svgNS, 'line');
+        fbLine.setAttribute('x1', '10'); fbLine.setAttribute('y1', '10'); fbLine.setAttribute('x2', '14'); fbLine.setAttribute('y2', '14');
+        fbSvg.appendChild(fbCircle); fbSvg.appendChild(fbLine);
+        filterBtn.appendChild(fbSvg);
+        th.appendChild(filterBtn);
+      }
+      headerTr.appendChild(th);
+    }
+    thead.appendChild(headerTr);
+
+    // Filter row
+    const filterTr = mk('tr', 'ljf-co-filter-row');
+    if (!companyFilterOpen && !companyFilter) filterTr.style.display = 'none';
+    const filterTd = document.createElement('td');
+    filterTd.colSpan = colCount;
+    const filterWrap = mk('div', null, 'ljf-co-filter-wrap');
+    const filterInput = mk('input', 'ljf-co-filter-input');
+    filterInput.type = 'text'; filterInput.placeholder = 'Filter by company…';
+    filterInput.value = companyFilter; filterInput.autocomplete = 'off';
+    const filterClear = mk('button', null, 'ljf-co-filter-clear');
+    filterClear.title = 'Clear filter'; filterClear.textContent = '✕';
+    filterWrap.appendChild(filterInput); filterWrap.appendChild(filterClear);
+    filterTd.appendChild(filterWrap); filterTr.appendChild(filterTd);
+    thead.appendChild(filterTr);
+
+    // Tbody — each tr is fresh, innerHTML is safe
+    const tbody = document.createElement('tbody');
+    if (indexed.length === 0) {
+      const emptyTr = document.createElement('tr');
+      const emptyTd = document.createElement('td');
+      emptyTd.colSpan = colCount;
+      emptyTd.className = 'ljf-jobs-empty';
+      emptyTd.textContent = isDismView ? 'No dismissed jobs logged yet.' : 'No applications logged yet.';
+      emptyTr.appendChild(emptyTd);
+      tbody.appendChild(emptyTr);
+    } else if (isDismView) {
+      function mkTd(cls, titleVal, text) {
+        const td = document.createElement('td');
+        if (cls) td.className = cls;
+        if (titleVal) td.title = titleVal;
+        td.textContent = text;
+        return td;
+      }
+      for (const { e: entry, i: logIdx } of indexed) {
+        const tr = document.createElement('tr');
+        tr.dataset.dmIdx   = logIdx;
+        tr.dataset.company = (entry.company || '').toLowerCase();
+        const co  = entry.company  || '—';
+        const ti  = entry.title    || '—';
+        const loc = entry.location || '';
+        const dt  = entry.date     || '';
+        tr.appendChild(mkTd('ljf-col-trunc', co, co));
+        tr.appendChild(mkTd('ljf-col-trunc', ti, ti));
+        tr.appendChild(mkTd('ljf-col-trunc ljf-col-muted', loc, loc || '—'));
+        tr.appendChild(mkTd('ljf-col-muted', '', dt || '—'));
+        tr.appendChild(mkTd('ljf-col-muted ljf-center', '', daysAgo(entry.date || '')));
+        const delTd = document.createElement('td'); delTd.className = 'ljf-col-icon';
+        const delBtn = document.createElement('button');
+        delBtn.className = 'ljf-log-del'; delBtn.dataset.dmIdx = logIdx;
+        delBtn.title = 'Delete entry'; delBtn.textContent = '✕';
+        delTd.appendChild(delBtn); tr.appendChild(delTd);
+        tbody.appendChild(tr);
+      }
+    } else {
+      const liSvgNS = 'http://www.w3.org/2000/svg';
+      function buildLiIcon() {
+        const s = document.createElementNS(liSvgNS, 'svg');
+        s.setAttribute('viewBox', '0 0 16 16'); s.setAttribute('width', '14'); s.setAttribute('height', '14');
+        s.setAttribute('focusable', 'false'); s.setAttribute('class', 'ljf-li-icon');
+        const p = document.createElementNS(liSvgNS, 'path');
+        p.setAttribute('d', 'M15 2v12a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1h12a1 1 0 011 1zM5 6H3v7h2zm.25-2A1.25 1.25 0 104 5.25 1.25 1.25 0 005.25 4zM13 9.29c0-2.2-.73-3.49-2.86-3.49A2.71 2.71 0 007.89 7V6H6v7h2V9.73a1.73 1.73 0 011.52-1.92h.14C10.82 7.8 11 8.94 11 9.73V13h2z');
+        p.setAttribute('fill', '#0a66c2');
+        s.appendChild(p);
+        return s;
+      }
+      for (const { e: entry, i: logIdx } of indexed) {
+        const tr = document.createElement('tr');
+        tr.dataset.logIdx  = logIdx;
+        tr.dataset.company = (entry.company || '').toLowerCase();
+        const status = entry.status || 'applied';
+        const sc     = statusStyle(status);
+        const co     = entry.company || '—';
+        const ti     = entry.title   || '—';
+        const url    = entry.url || '';
+        const dt     = entry.date    || '';
+        // Company cell
+        const coTd = document.createElement('td');
+        coTd.className = 'ljf-col-trunc ljf-co-cell'; coTd.dataset.company = co; coTd.title = co; coTd.textContent = co;
+        tr.appendChild(coTd);
+        // Title cell
+        const tiTd = document.createElement('td');
+        tiTd.className = 'ljf-col-trunc'; tiTd.title = ti; tiTd.textContent = ti;
+        tr.appendChild(tiTd);
+        // Date cell
+        const dtTd = document.createElement('td');
+        dtTd.className = 'ljf-col-muted'; dtTd.textContent = dt || '—';
+        tr.appendChild(dtTd);
+        // Days cell
+        const daysTd = document.createElement('td');
+        daysTd.className = 'ljf-col-muted ljf-center'; daysTd.textContent = daysAgo(entry.date || '');
+        tr.appendChild(daysTd);
+        // Status cell
+        const statusTd = document.createElement('td');
+        statusTd.style.padding = '1px 3px';
+        const sel = document.createElement('select');
+        sel.className = 'ljf-status-sel'; sel.dataset.logIdx = logIdx;
+        sel.style.background = sc.bg; sel.style.color = sc.text;
+        for (const s of STATUS_OPTIONS) {
+          const opt = document.createElement('option');
+          opt.value = s; opt.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+          if (s === status) opt.selected = true;
+          sel.appendChild(opt);
+        }
+        statusTd.appendChild(sel); tr.appendChild(statusTd);
+        // LinkedIn link cell
+        const linkTd = document.createElement('td');
+        linkTd.className = 'ljf-col-icon';
+        if (url) {
+          const a = document.createElement('a');
+          a.href = url; a.target = '_blank'; a.rel = 'noopener';
+          a.className = 'ljf-li-link'; a.title = 'Open listing';
+          a.appendChild(buildLiIcon());
+          linkTd.appendChild(a);
+        }
+        tr.appendChild(linkTd);
+        // Delete cell
+        const delTd2 = document.createElement('td'); delTd2.className = 'ljf-col-icon';
+        const delBtn2 = document.createElement('button');
+        delBtn2.className = 'ljf-log-del'; delBtn2.dataset.logIdx = logIdx;
+        delBtn2.title = 'Delete entry'; delBtn2.textContent = '✕';
+        delTd2.appendChild(delBtn2); tr.appendChild(delTd2);
+        tbody.appendChild(tr);
+      }
+    }
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    scrollDiv.appendChild(table);
+
+    // Add form row
+    const addFormEl = mk('div', 'ljf-add-job-row', 'ljf-add-job-row');
+    if (isDismView) {
+      const coInp = mk('input', 'ljf-aj-company', 'ljf-add-job-input');
+      coInp.type = 'text'; coInp.placeholder = 'Company';
+      coInp.setAttribute('list', 'ljf-co-list'); coInp.autocomplete = 'off'; coInp.style.flex = '0 0 25%';
+      const tiInp = mk('input', 'ljf-aj-title', 'ljf-add-job-input');
+      tiInp.type = 'text'; tiInp.placeholder = 'Title';
+      tiInp.setAttribute('list', 'ljf-ti-list'); tiInp.autocomplete = 'off'; tiInp.style.flex = '0 0 28%';
+      const locInp = mk('input', 'ljf-aj-location', 'ljf-add-job-input');
+      locInp.type = 'text'; locInp.placeholder = 'Location';
+      locInp.autocomplete = 'off'; locInp.style.flex = '1'; locInp.style.minWidth = '0';
+      const dateInp = mk('input', 'ljf-aj-date', 'ljf-add-job-input');
+      dateInp.type = 'date'; dateInp.value = today; dateInp.style.flex = '0 0 14%';
+      addFormEl.appendChild(coInp); addFormEl.appendChild(tiInp);
+      addFormEl.appendChild(locInp); addFormEl.appendChild(dateInp);
+    } else {
+      const coInp = mk('input', 'ljf-aj-company', 'ljf-add-job-input');
+      coInp.type = 'text'; coInp.placeholder = 'Company';
+      coInp.setAttribute('list', 'ljf-co-list'); coInp.autocomplete = 'off'; coInp.style.flex = '0 0 26%';
+      const tiInp = mk('input', 'ljf-aj-title', 'ljf-add-job-input');
+      tiInp.type = 'text'; tiInp.placeholder = 'Title';
+      tiInp.setAttribute('list', 'ljf-ti-list'); tiInp.autocomplete = 'off'; tiInp.style.flex = '0 0 33%';
+      const dateInp = mk('input', 'ljf-aj-date', 'ljf-add-job-input');
+      dateInp.type = 'date'; dateInp.value = today; dateInp.style.flex = '0 0 17%';
+      const statusSel = mk('select', 'ljf-aj-status', 'ljf-add-job-sel');
+      statusSel.style.flex = '0 0 12%';
+      for (const s of STATUS_OPTIONS) {
+        const o = document.createElement('option'); o.value = s;
+        o.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+        statusSel.appendChild(o);
+      }
+      const urlInp = mk('input', 'ljf-aj-url', 'ljf-add-job-input');
+      urlInp.type = 'url'; urlInp.placeholder = 'Job URL';
+      urlInp.autocomplete = 'off'; urlInp.style.flex = '1'; urlInp.style.minWidth = '0';
+      addFormEl.appendChild(coInp); addFormEl.appendChild(tiInp); addFormEl.appendChild(dateInp);
+      addFormEl.appendChild(statusSel); addFormEl.appendChild(urlInp);
+    }
+    const saveBtn = mk('button', 'ljf-aj-add', 'ljf-add-job-submit');
+    saveBtn.textContent = 'Save';
+    addFormEl.appendChild(saveBtn);
+
+    // Footer
     const toggleOn = activeLogView === 'jobs';
-    const toggleHtml = `
-<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--ljf-count-text);cursor:pointer;" id="ljf-log-view-toggle">
-  <span>Log</span>
-  <div style="position:relative;width:28px;height:16px;border-radius:8px;flex-shrink:0;background:${toggleOn ? '#4e7af7' : (darkMode ? '#444' : '#bbb')};">
-    <div style="position:absolute;top:2px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);left:${toggleOn ? '14px' : '2px'};transition:left .15s;"></div>
-  </div>
-  <span>${toggleOn ? 'Jobs' : 'Dismissed'}</span>
-</div>`;
+    const footer = mk('div', 'ljf-jobs-footer', 'ljf-jobs-footer');
 
-    // Form
-    const addFormHtml = isDismView ? `
-<div id="ljf-add-job-row" class="ljf-add-job-row">
-  <input id="ljf-aj-company"  class="ljf-add-job-input" type="text" placeholder="Company"  list="ljf-co-list" autocomplete="off" style="flex:0 0 25%;">
-  <input id="ljf-aj-title"    class="ljf-add-job-input" type="text" placeholder="Title"    list="ljf-ti-list" autocomplete="off" style="flex:0 0 28%;">
-  <input id="ljf-aj-location" class="ljf-add-job-input" type="text" placeholder="Location" autocomplete="off" style="flex:1;min-width:0;">
-  <input id="ljf-aj-date"     class="ljf-add-job-input" type="date" value="${today}" style="flex:0 0 14%;">
-  <button id="ljf-aj-add" class="ljf-add-job-submit">Save</button>
-</div>` : `
-<div id="ljf-add-job-row" class="ljf-add-job-row">
-  <input id="ljf-aj-company" class="ljf-add-job-input" type="text" placeholder="Company"  list="ljf-co-list" autocomplete="off" style="flex:0 0 26%;">
-  <input id="ljf-aj-title"   class="ljf-add-job-input" type="text" placeholder="Title"    list="ljf-ti-list" autocomplete="off" style="flex:0 0 33%;">
-  <input id="ljf-aj-date"    class="ljf-add-job-input" type="date" value="${today}" style="flex:0 0 17%;">
-  <select id="ljf-aj-status" class="ljf-add-job-sel" style="flex:0 0 12%;">
-    ${STATUS_OPTIONS.map(s => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join('')}
-  </select>
-  <input id="ljf-aj-url" class="ljf-add-job-input" type="url" placeholder="Job URL" autocomplete="off" style="flex:1;min-width:0;">
-  <button id="ljf-aj-add" class="ljf-add-job-submit">Save</button>
-</div>`;
+    const statsDiv = mk('div', null, 'ljf-footer-stats');
+    const statsSpan = document.createElement('span');
+    statsSpan.textContent = isDismView
+      ? indexed.length + ' dismissed'
+      : indexed.length + ' application' + (indexed.length === 1 ? '' : 's');
+    statsDiv.appendChild(statsSpan);
+    if (!isDismView && appliedLog.length > 0) {
+      const counts = { applied:0, interviewing:0, offer:0, rejected:0, closed:0, withdrawn:0 };
+      for (const e of appliedLog) counts[e.status || 'applied']++;
+      const total     = appliedLog.length;
+      const responded = counts.interviewing + counts.offer + counts.closed;
+      const pills = [total + ' apps'];
+      if (responded > 0)          pills.push(Math.round(responded / total * 100) + '% response');
+      if (counts.rejected > 0)    pills.push(Math.round(counts.rejected / total * 100) + '% ghosted');
+      if (counts.interviewing > 0) pills.push(counts.interviewing + ' interviewing');
+      for (const p of pills) {
+        const pill = document.createElement('span');
+        pill.className = 'ljf-stat-pill'; pill.textContent = p;
+        statsDiv.appendChild(pill);
+      }
+    }
+    footer.appendChild(statsDiv);
 
-    const footerStats = isDismView
-      ? `<span>${indexed.length} dismissed</span>`
-      : `<span>${indexed.length} application${indexed.length === 1 ? '' : 's'}</span>${computeStats(appliedLog)}`;
+    const footerRight = document.createElement('div');
+    footerRight.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    const toggleDiv = mk('div', 'ljf-log-view-toggle');
+    toggleDiv.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:10px;color:var(--ljf-count-text);cursor:pointer;';
+    const tLeft = document.createElement('span'); tLeft.textContent = 'Log';
+    const tTrack = document.createElement('div');
+    tTrack.style.cssText = `position:relative;width:28px;height:16px;border-radius:8px;flex-shrink:0;background:${toggleOn ? '#4e7af7' : (darkMode ? '#444' : '#bbb')};`;
+    const tThumb = document.createElement('div');
+    tThumb.style.cssText = `position:absolute;top:2px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);left:${toggleOn ? '14px' : '2px'};transition:left .15s;`;
+    tTrack.appendChild(tThumb);
+    const tRight = document.createElement('span'); tRight.textContent = toggleOn ? 'Jobs' : 'Dismissed';
+    toggleDiv.appendChild(tLeft); toggleDiv.appendChild(tTrack); toggleDiv.appendChild(tRight);
+    const footerAddBtn = mk('button', 'ljf-footer-add', 'ljf-footer-add');
+    footerAddBtn.title = isDismView ? 'Add dismissed entry' : 'Add job manually';
+    footerAddBtn.textContent = '+';
+    footerRight.appendChild(toggleDiv); footerRight.appendChild(footerAddBtn);
+    footer.appendChild(footerRight);
 
-    pane.innerHTML = `
-<datalist id="ljf-co-list">${coOptions}</datalist>
-<datalist id="ljf-ti-list">${tiOptions}</datalist>
-<div class="ljf-jobs-scroll">
-  <table class="ljf-jobs-table">
-    <thead>
-      <tr>${headerCells}</tr>
-      <tr id="ljf-co-filter-row"${companyFilterOpen || companyFilter ? '' : ' style="display:none"'}>
-        <td colspan="${colCount}">
-          <div class="ljf-co-filter-wrap">
-            <input id="ljf-co-filter-input" type="text" placeholder="Filter by company…" value="${escHtml(companyFilter)}" autocomplete="off">
-            <button class="ljf-co-filter-clear" title="Clear filter">✕</button>
-          </div>
-        </td>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
-</div>
-${addFormHtml}
-<div id="ljf-jobs-footer" class="ljf-jobs-footer">
-  <div class="ljf-footer-stats">${footerStats}</div>
-  <div style="display:flex;align-items:center;gap:6px;">
-    ${toggleHtml}
-    <button id="ljf-footer-add" class="ljf-footer-add" title="${isDismView ? 'Add dismissed entry' : 'Add job manually'}">+</button>
-  </div>
-</div>`;
+    // Replace pane content
+    while (pane.firstChild) pane.removeChild(pane.firstChild);
+    pane.appendChild(coList); pane.appendChild(tiList);
+    pane.appendChild(scrollDiv); pane.appendChild(addFormEl); pane.appendChild(footer);
 
     // Sort header click handlers
     pane.querySelectorAll('th[data-sort]').forEach(thEl => {
@@ -2137,60 +2279,115 @@ ${addFormHtml}
     buildPanelContent();
   }
 
-  function buildPanelHTML() {
-    return `
-<div id="ljf-header" class="ljf-header">
-  <strong>LinkedIn Job Filter</strong>
-  <div class="ljf-header-btns">
-    <button id="ljf-help" class="ljf-help" title="Help / About">?</button>
-    <button id="ljf-gear" class="ljf-gear" title="Settings">&#9881;</button>
-  </div>
-</div>
+  function buildPanelDOM(panel) {
+    function mk(tag, id, cls) {
+      const el = document.createElement(tag);
+      if (id)  el.id        = id;
+      if (cls) el.className = cls;
+      return el;
+    }
 
-<div id="ljf-tab-bar" class="ljf-tab-bar">
-  ${['rules','jobs'].map(p => `
-  <button id="ljf-pane-btn-${p}" class="ljf-tab-btn${activePanel===p ? ' ljf-active' : ''}">
-    ${p.charAt(0).toUpperCase()+p.slice(1)}
-  </button>`).join('')}
-</div>
+    // Header
+    const header = mk('div', 'ljf-header', 'ljf-header');
+    const titleEl = mk('strong');
+    titleEl.textContent = 'LinkedIn Job Filter';
+    header.appendChild(titleEl);
+    const headerBtns = mk('div', null, 'ljf-header-btns');
+    const helpBtn = mk('button', 'ljf-help', 'ljf-help');
+    helpBtn.title = 'Help / About'; helpBtn.textContent = '?';
+    headerBtns.appendChild(helpBtn);
+    const gearBtn = mk('button', 'ljf-gear', 'ljf-gear');
+    gearBtn.title = 'Settings'; gearBtn.textContent = '⚙';
+    headerBtns.appendChild(gearBtn);
+    header.appendChild(headerBtns);
+    panel.appendChild(header);
 
-<div id="ljf-pane-rules" class="ljf-pane${activePanel==='rules' ? ' ljf-active' : ''}">
-  ${dismissActionsEnabled ? `
-  <div class="ljf-action-bar">
-    <button id="ljf-run-all" class="ljf-action-btn">&#10005; Dismiss All</button>
-  </div>` : ''}
+    // Tab bar
+    const tabBar = mk('div', 'ljf-tab-bar', 'ljf-tab-bar');
+    for (const p of ['rules', 'jobs']) {
+      const btn = mk('button', 'ljf-pane-btn-' + p, 'ljf-tab-btn' + (activePanel === p ? ' ljf-active' : ''));
+      btn.textContent = p.charAt(0).toUpperCase() + p.slice(1);
+      tabBar.appendChild(btn);
+    }
+    panel.appendChild(tabBar);
 
-  <div id="ljf-rules-list" class="ljf-rules-list"></div>
+    // Rules pane
+    const rulesPane = mk('div', 'ljf-pane-rules', 'ljf-pane' + (activePanel === 'rules' ? ' ljf-active' : ''));
 
-  <div id="ljf-add-form" class="ljf-add-form">
-    <div id="ljf-add-form-title" class="ljf-form-label">Add Rule</div>
-    <select id="ljf-type-sel" class="ljf-form-control">
-      ${DROPDOWN_TYPES.map(k => `<option value="${k}">${RULE_TYPES[k].label}</option>`).join('')}
-    </select>
-    <input id="ljf-value-input" type="text" class="ljf-form-control"
-      placeholder="Value  (e.g. Ethos, 100, Sales...)"/>
-    <input id="ljf-label-input" type="text" class="ljf-form-control ljf-mb8"
-      placeholder="Label  (optional)"/>
-    <button id="ljf-add-btn" class="ljf-add-btn">+ Add Rule</button>
-  </div>
+    if (dismissActionsEnabled) {
+      const actionBar = mk('div', null, 'ljf-action-bar');
+      const runAllBtn = mk('button', 'ljf-run-all', 'ljf-action-btn');
+      runAllBtn.textContent = '✕ Dismiss All';
+      actionBar.appendChild(runAllBtn);
+      rulesPane.appendChild(actionBar);
+    }
 
-  ${dismissActionsEnabled ? `
-  <div class="ljf-quick-bar">
-    <div class="ljf-form-label ljf-qdmode-label" id="ljf-qdmode-label" title="Click to cycle mode" style="cursor:pointer;user-select:none">Quick Dismiss (<span id="ljf-qdmode-text">${{ company: 'Company', title: 'Title Keywords', location: 'Location Keywords' }[quickDismissMode]}</span>)</div>
-    <div class="ljf-quick-row">
-      <input id="ljf-quick-value" type="text" class="ljf-quick-input" placeholder="${{ company: 'Company name', title: 'Title keyword', location: 'Location keyword' }[quickDismissMode]}"/>
-      <button id="ljf-quick-dismiss" class="ljf-quick-btn">Dismiss</button>
-    </div>
-  </div>` : ''}
-</div>
+    rulesPane.appendChild(mk('div', 'ljf-rules-list', 'ljf-rules-list'));
 
-<div id="ljf-pane-jobs" class="ljf-pane${activePanel==='jobs' ? ' ljf-active' : ''}"></div>
+    const addForm = mk('div', 'ljf-add-form', 'ljf-add-form');
+    const addFormTitle = mk('div', 'ljf-add-form-title', 'ljf-form-label');
+    addFormTitle.textContent = 'Add Rule';
+    addForm.appendChild(addFormTitle);
 
-<div id="ljf-status" class="ljf-status-bar" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-  <span id="ljf-status-msg">Ready</span>
-  <span id="ljf-dismiss-log-count" style="font-size:10px;opacity:.6;white-space:nowrap;flex-shrink:0;"></span>
-</div>
-`;
+    const typeSel = mk('select', 'ljf-type-sel', 'ljf-form-control');
+    for (const k of DROPDOWN_TYPES) {
+      const opt = document.createElement('option');
+      opt.value = k; opt.textContent = RULE_TYPES[k].label;
+      typeSel.appendChild(opt);
+    }
+    addForm.appendChild(typeSel);
+
+    const valueInput = mk('input', 'ljf-value-input', 'ljf-form-control');
+    valueInput.type = 'text'; valueInput.placeholder = 'Value  (e.g. Ethos, 100, Sales...)';
+    addForm.appendChild(valueInput);
+
+    const labelInput = mk('input', 'ljf-label-input', 'ljf-form-control ljf-mb8');
+    labelInput.type = 'text'; labelInput.placeholder = 'Label  (optional)';
+    addForm.appendChild(labelInput);
+
+    const addBtn = mk('button', 'ljf-add-btn', 'ljf-add-btn');
+    addBtn.textContent = '+ Add Rule';
+    addForm.appendChild(addBtn);
+    rulesPane.appendChild(addForm);
+
+    if (dismissActionsEnabled) {
+      const QD_LABELS = { company: 'Company', title: 'Title Keywords', location: 'Location Keywords' };
+      const QD_PH     = { company: 'Company name', title: 'Title keyword', location: 'Location keyword' };
+      const quickBar  = mk('div', null, 'ljf-quick-bar');
+      const qdLabel   = mk('div', 'ljf-qdmode-label', 'ljf-form-label ljf-qdmode-label');
+      qdLabel.title = 'Click to cycle mode';
+      qdLabel.style.cssText = 'cursor:pointer;user-select:none';
+      qdLabel.appendChild(document.createTextNode('Quick Dismiss ('));
+      const qdText = mk('span', 'ljf-qdmode-text');
+      qdText.textContent = QD_LABELS[quickDismissMode];
+      qdLabel.appendChild(qdText);
+      qdLabel.appendChild(document.createTextNode(')'));
+      quickBar.appendChild(qdLabel);
+      const quickRow = mk('div', null, 'ljf-quick-row');
+      const quickInput = mk('input', 'ljf-quick-value', 'ljf-quick-input');
+      quickInput.type = 'text'; quickInput.placeholder = QD_PH[quickDismissMode];
+      quickRow.appendChild(quickInput);
+      const qdBtn = mk('button', 'ljf-quick-dismiss', 'ljf-quick-btn');
+      qdBtn.textContent = 'Dismiss';
+      quickRow.appendChild(qdBtn);
+      quickBar.appendChild(quickRow);
+      rulesPane.appendChild(quickBar);
+    }
+    panel.appendChild(rulesPane);
+
+    // Jobs pane
+    panel.appendChild(mk('div', 'ljf-pane-jobs', 'ljf-pane' + (activePanel === 'jobs' ? ' ljf-active' : '')));
+
+    // Status bar
+    const statusBar = mk('div', 'ljf-status', 'ljf-status-bar');
+    statusBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;';
+    const statusMsg = mk('span', 'ljf-status-msg');
+    statusMsg.textContent = 'Ready';
+    statusBar.appendChild(statusMsg);
+    const dlCount = mk('span', 'ljf-dismiss-log-count');
+    dlCount.style.cssText = 'font-size:10px;opacity:.6;white-space:nowrap;flex-shrink:0;';
+    statusBar.appendChild(dlCount);
+    panel.appendChild(statusBar);
   }
 
   function wirePanelEvents() {
@@ -2316,12 +2513,29 @@ ${addFormHtml}
       const lastDate = entries.map(e => e.date || '').filter(Boolean).sort().at(-1) || '';
       const hasHiRule = rules.some(r => r.type === 'companyhi' && r.value.toLowerCase() === company.toLowerCase());
 
-      jcp.innerHTML = `
-        <div class="ljf-jcp-company">${escHtml(company)}</div>
-        <ul class="ljf-jcp-titles">${titles.map(ti => `<li class="ljf-jcp-title">${escHtml(ti)}</li>`).join('')}</ul>
-        ${lastDate ? `<div class="ljf-jcp-meta">Last applied: ${escHtml(lastDate)}</div>` : ''}
-        <button class="ljf-jcp-hi-btn"${hasHiRule ? ' disabled' : ''}>${hasHiRule ? '\u2713 Highlight rule exists' : '+ Add highlight rule'}</button>
-      `;
+      while (jcp.firstChild) jcp.removeChild(jcp.firstChild);
+      const jcpCo = document.createElement('div');
+      jcpCo.className = 'ljf-jcp-company'; jcpCo.textContent = company;
+      jcp.appendChild(jcpCo);
+      const jcpUl = document.createElement('ul');
+      jcpUl.className = 'ljf-jcp-titles';
+      for (const ti of titles) {
+        const li = document.createElement('li');
+        li.className = 'ljf-jcp-title'; li.textContent = ti;
+        jcpUl.appendChild(li);
+      }
+      jcp.appendChild(jcpUl);
+      if (lastDate) {
+        const jcpMeta = document.createElement('div');
+        jcpMeta.className = 'ljf-jcp-meta';
+        jcpMeta.textContent = 'Last applied: ' + lastDate;
+        jcp.appendChild(jcpMeta);
+      }
+      const jcpHiBtn = document.createElement('button');
+      jcpHiBtn.className = 'ljf-jcp-hi-btn';
+      if (hasHiRule) { jcpHiBtn.textContent = '\u2713 Highlight rule exists'; jcpHiBtn.disabled = true; }
+      else { jcpHiBtn.textContent = '+ Add highlight rule'; }
+      jcp.appendChild(jcpHiBtn);
 
       jcp.querySelector('.ljf-jcp-hi-btn')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -2391,7 +2605,8 @@ ${addFormHtml}
       const tab = document.getElementById('ljf-tab');
       if (tab) tab.style.right = panelWidthPx();
     }
-    panel.innerHTML = buildPanelHTML();
+    while (panel.firstChild) panel.removeChild(panel.firstChild);
+    buildPanelDOM(panel);
     setPanelVars();
     wirePanelEvents();
     updateTabTheme();
@@ -4037,6 +4252,11 @@ function setupApplyCapture() {
   function init() {
     maybeBootstrap();
     buildUI();
+    if (document.head) {
+      new MutationObserver(() => {
+        if (!document.getElementById('ljf-styles')) { buildPanelStyles(); setPanelVars(); }
+      }).observe(document.head, { childList: true });
+    }
     setupCardHoverMenu();
     setupApplyCapture();
     setupViewPageApplyCapture();
