@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.6.4
+// @version      1.6.5
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -27,7 +27,7 @@
   const DISMISS_LOG_KEY  = 'ljf_dismiss_log';
   const SOURCE_URL       = 'https://github.com/thefeaturecreature/linkedin-jobs-curator';
 
-  const CARD_SEL    = 'li.jobs-search-results__list-item, li.scaffold-layout__list-item, li.discovery-templates-entity-item, a[componentkey]:has(div[data-display-contents] > p[style])';
+  const CARD_SEL    = 'li.jobs-search-results__list-item, li.scaffold-layout__list-item, li.discovery-templates-entity-item, a[componentkey]:has(div[data-display-contents] > p[style]), div[role="button"][componentkey]:has(div[data-display-contents] > p[style])';
   const TITLE_SEL   = '.job-card-list__title--link, .job-card-container__link, div[data-display-contents] > p[style] > span[aria-hidden="true"]';
   const COMPANY_SEL = '.artdeco-entity-lockup__subtitle span, div[data-display-contents] + div > p:first-child';
   const SALARY_SEL  = '.job-card-container__metadata-item, .job-card-container__metadata-wrapper li span, div[data-display-contents] + div > p';
