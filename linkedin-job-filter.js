@@ -4099,12 +4099,20 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
     const titleEl   = document.querySelector(DETAIL_TITLE_SEL);
     const companyEl = document.querySelector(DETAIL_COMPANY_SEL);
 
-    const title   = titleEl   ? titleEl.textContent.trim()   : '';
-    const company = companyEl ? companyEl.textContent.trim() : '';
+    let title   = titleEl   ? titleEl.textContent.trim()   : '';
+    let company = companyEl ? companyEl.textContent.trim() : '';
+
+    // On a standalone view page the detail-pane selectors find nothing — fall back to document.title
+    if (!title && !company && /\/jobs\/view\/\d+/.test(window.location.pathname)) {
+      const parts = document.title.split(' | ');
+      title   = (parts[0] || '').trim();
+      company = (parts[1] || '').trim();
+    }
+
     if (!title && !company) return;
 
     const href   = titleEl ? (titleEl.getAttribute('href') || '') : '';
-    const jobIdM = href.match(/\/jobs\/view\/(\d+)/);
+    const jobIdM = href.match(/\/jobs\/view\/(\d+)/) || window.location.pathname.match(/\/jobs\/view\/(\d+)/);
     const url    = jobIdM
       ? 'https://www.linkedin.com/jobs/view/' + jobIdM[1] + '/'
       : window.location.href;
@@ -4260,6 +4268,13 @@ function setupApplyCapture() {
     setupCardHoverMenu();
     setupApplyCapture();
     setupViewPageApplyCapture();
+
+    // Re-arm view page observer on SPA navigation (LinkedIn uses pushState)
+    const _pushState = history.pushState.bind(history);
+    history.pushState = function(state, title, url) {
+      _pushState(state, title, url);
+      if (/\/jobs\/view\/\d+/.test(String(url))) setupViewPageApplyCapture();
+    };
     setTimeout(() => {
       const n = applyAllRules();
       setStatus('Initial scan \u2014 ' + n + ' card(s) matched.');

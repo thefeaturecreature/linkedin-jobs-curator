@@ -124,6 +124,6 @@ Notable functions in `linkedin-job-filter.js`.
 | Function | Description |
 |---|---|
 | `setupApplyCapture()` | Listen for "Yes, applied" clicks, undo clicks, and native dismiss clicks |
-| `captureAppliedJob()` | Log a job as applied from the current detail pane |
+| `captureAppliedJob()` | Log a job as applied from the current detail pane; falls back to `document.title` parsing on standalone view pages |
 | `captureViewPageAppliedJob()` | Log an applied job from a job view page URL |
 | `setupViewPageApplyCapture()` | Set up MutationObserver for view-page apply confirmation |
