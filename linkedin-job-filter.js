@@ -139,8 +139,9 @@
   let panelOpen          = false;
   let activePanel        = GM_getValue('ljf_activePanel', 'rules');
   let jobSort            = { col: 'date', dir: 'desc' };
-  let companyFilter      = '';
-  let companyFilterOpen  = false;
+  let filterMode         = 'company';  // 'company' | 'title' | 'status'
+  let filterValue        = '';
+  let filterOpen         = false;
   let editingLogIdx        = null;
   let editingDismissLogIdx = null;
   let activeLogView        = 'jobs';   // 'jobs' | 'dismissed'
@@ -339,10 +340,12 @@
   background:var(--ljf-header-bg);border-bottom:1px solid var(--ljf-border1);
   padding:3px 6px;position:sticky;top:24px;z-index:10; }
 #ljf-panel .ljf-co-filter-wrap { display:flex;align-items:center;gap:4px; }
-#ljf-panel #ljf-co-filter-input {
+#ljf-panel #ljf-filter-input,
+#ljf-panel #ljf-filter-status-sel {
   flex:1;min-width:0;font-size:11px;padding:2px 6px;
   border:1px solid var(--ljf-border2);border-radius:3px;
   background:var(--ljf-form-bg);color:var(--ljf-panel-text);outline:none; }
+#ljf-panel #ljf-filter-status-sel { cursor:pointer; }
 #ljf-panel .ljf-co-filter-clear {
   flex-shrink:0;width:15px;height:15px;border-radius:50%;
   border:1px solid var(--ljf-border1);background:transparent;cursor:pointer;
@@ -505,7 +508,7 @@
       : { company:'Company', title:'Title', date:'Applied', days:'Age', status:'Status', link:'', del:'' };
     const WIDTHS = isDismView
       ? { company:'25%', title:'28%', location:'22%', date:'11%', days:'8%', del:'6%' }
-      : { company:'26%', title:'33%', date:'12%', days:'7%', status:'12%', link:'5%', del:'5%' };
+      : { company:'26%', title:'31%', date:'12%', days:'7%', status:'15%', link:'5%', del:'4%' };
     const SORTABLE = isDismView
       ? new Set(['company', 'title', 'date'])
       : new Set(['company', 'title', 'date', 'status']);
@@ -571,10 +574,14 @@
         arrowSpan.textContent = arrow;
         th.appendChild(arrowSpan);
       }
-      if (col === 'company') {
+      if (col === 'company' || col === 'title' || (col === 'status' && !isDismView)) {
+        const isTitle = col === 'title';
+        const isStatus = col === 'status';
+        const isActive = filterValue && filterMode === col;
         const filterBtn = document.createElement('button');
-        filterBtn.className = 'ljf-co-filter-btn' + (companyFilter || companyFilterOpen ? ' ljf-co-filter-active' : '');
-        filterBtn.title = 'Filter by company';
+        filterBtn.id = isStatus ? 'ljf-st-filter-btn' : (isTitle ? 'ljf-ti-filter-btn' : 'ljf-co-filter-btn');
+        filterBtn.className = 'ljf-co-filter-btn' + (isActive ? ' ljf-co-filter-active' : '');
+        filterBtn.title = isStatus ? 'Filter by status' : (isTitle ? 'Filter by title' : 'Filter by company');
         const svgNS = 'http://www.w3.org/2000/svg';
         const fbSvg = document.createElementNS(svgNS, 'svg');
         fbSvg.setAttribute('viewBox', '0 0 16 16'); fbSvg.setAttribute('width', '9'); fbSvg.setAttribute('height', '9');
@@ -594,16 +601,33 @@
 
     // Filter row
     const filterTr = mk('tr', 'ljf-co-filter-row');
-    if (!companyFilterOpen && !companyFilter) filterTr.style.display = 'none';
+    if (!filterOpen && !filterValue) filterTr.style.display = 'none';
     const filterTd = document.createElement('td');
     filterTd.colSpan = colCount;
     const filterWrap = mk('div', null, 'ljf-co-filter-wrap');
-    const filterInput = mk('input', 'ljf-co-filter-input');
-    filterInput.type = 'text'; filterInput.placeholder = 'Filter by company…';
-    filterInput.value = companyFilter; filterInput.autocomplete = 'off';
+    if (filterMode === 'status' && !isDismView) {
+      const stSel = mk('select', 'ljf-filter-status-sel');
+      const allOpt = document.createElement('option');
+      allOpt.value = ''; allOpt.textContent = 'Any status';
+      stSel.appendChild(allOpt);
+      for (const s of STATUS_OPTIONS) {
+        const opt = document.createElement('option');
+        opt.value = s; opt.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+        if (s === filterValue) opt.selected = true;
+        stSel.appendChild(opt);
+      }
+      filterWrap.appendChild(stSel);
+    } else {
+      const filterInput = mk('input', 'ljf-filter-input');
+      filterInput.type = 'text';
+      filterInput.placeholder = filterMode === 'company' ? 'Filter by company…' : 'Filter by title…';
+      filterInput.value = filterValue;
+      filterInput.autocomplete = 'off';
+      filterWrap.appendChild(filterInput);
+    }
     const filterClear = mk('button', null, 'ljf-co-filter-clear');
     filterClear.title = 'Clear filter'; filterClear.textContent = '✕';
-    filterWrap.appendChild(filterInput); filterWrap.appendChild(filterClear);
+    filterWrap.appendChild(filterClear);
     filterTd.appendChild(filterWrap); filterTr.appendChild(filterTd);
     thead.appendChild(filterTr);
 
@@ -629,6 +653,7 @@
         const tr = document.createElement('tr');
         tr.dataset.dmIdx   = logIdx;
         tr.dataset.company = (entry.company || '').toLowerCase();
+        tr.dataset.title   = (entry.title   || '').toLowerCase();
         const co  = entry.company  || '—';
         const ti  = entry.title    || '—';
         const loc = entry.location || '';
@@ -661,7 +686,9 @@
         const tr = document.createElement('tr');
         tr.dataset.logIdx  = logIdx;
         tr.dataset.company = (entry.company || '').toLowerCase();
+        tr.dataset.title   = (entry.title   || '').toLowerCase();
         const status = entry.status || 'applied';
+        tr.dataset.status  = status;
         const sc     = statusStyle(status);
         const co     = entry.company || '—';
         const ti     = entry.title   || '—';
@@ -768,17 +795,24 @@
     const footer = mk('div', 'ljf-jobs-footer', 'ljf-jobs-footer');
 
     const statsDiv = mk('div', null, 'ljf-footer-stats');
-    const statsSpan = document.createElement('span');
-    statsSpan.textContent = isDismView
-      ? indexed.length + ' dismissed'
-      : indexed.length + ' application' + (indexed.length === 1 ? '' : 's');
-    statsDiv.appendChild(statsSpan);
+    if (isDismView) {
+      const statsSpan = document.createElement('span');
+      statsSpan.textContent = indexed.length + ' dismissed';
+      statsDiv.appendChild(statsSpan);
+    }
     if (!isDismView && appliedLog.length > 0) {
       const counts = { applied:0, interviewing:0, offer:0, rejected:0, closed:0, withdrawn:0 };
       for (const e of appliedLog) counts[e.status || 'applied']++;
       const total     = appliedLog.length;
       const responded = counts.interviewing + counts.offer + counts.closed;
+      const _weekStart = new Date(_now);
+      _weekStart.setDate(_now.getDate() - _now.getDay());
+      const weekStartStr = [_weekStart.getFullYear(), String(_weekStart.getMonth() + 1).padStart(2, '0'), String(_weekStart.getDate()).padStart(2, '0')].join('-');
+      const todayCount = appliedLog.filter(e => e.date === today).length;
+      const weekCount  = appliedLog.filter(e => e.date >= weekStartStr && e.date <= today).length;
       const pills = [total + ' apps'];
+      if (todayCount > 0) pills.push('today: ' + todayCount);
+      if (weekCount  > 0) pills.push('week: '  + weekCount);
       if (responded > 0)          pills.push(Math.round(responded / total * 100) + '% response');
       if (counts.rejected > 0)    pills.push(Math.round(counts.rejected / total * 100) + '% ghosted');
       if (counts.interviewing > 0) pills.push(counts.interviewing + ' interviewing');
@@ -833,53 +867,106 @@
       activeLogView = activeLogView === 'jobs' ? 'dismissed' : 'jobs';
       editingLogIdx = null;
       editingDismissLogIdx = null;
-      companyFilter = '';
-      companyFilterOpen = false;
+      filterValue = '';
+      filterOpen = false;
+      if (activeLogView === 'dismissed' && filterMode === 'status') filterMode = 'company';
       jobSort.col = 'date';
       jobSort.dir = 'desc';
       renderJobsPane();
     });
 
-    // Company filter
-    function applyCompanyFilter() {
-      const q = companyFilter.toLowerCase();
+    // Filter
+    function applyFilters() {
       const rowSel = isDismView ? 'tbody tr[data-dm-idx]' : 'tbody tr[data-log-idx]';
       let visible = 0;
       pane.querySelectorAll(rowSel).forEach(tr => {
-        const show = !q || (tr.dataset.company || '').includes(q);
+        let show = true;
+        if (filterValue) {
+          const q = filterValue.toLowerCase();
+          if      (filterMode === 'company') show = (tr.dataset.company || '').includes(q);
+          else if (filterMode === 'title')   show = (tr.dataset.title   || '').includes(q);
+          else if (filterMode === 'status')  show = tr.dataset.status === filterValue;
+        }
         tr.style.display = show ? '' : 'none';
         if (show) visible++;
       });
-      const countEl = pane.querySelector('.ljf-footer-stats span');
+      const total = dataLog.length;
+      const countEl = isDismView
+        ? pane.querySelector('.ljf-footer-stats span')
+        : pane.querySelector('.ljf-footer-stats .ljf-stat-pill');
       if (countEl) {
-        const total = dataLog.length;
-        const label = isDismView ? 'dismissed' : ('application' + (total === 1 ? '' : 's'));
-        countEl.textContent = q ? `${visible} of ${total} ${label}` : `${total} ${label}`;
+        const label = isDismView ? 'dismissed' : 'apps';
+        countEl.textContent = filterValue
+          ? `${visible} of ${total} ${label}`
+          : `${total} ${label}`;
       }
     }
 
-    pane.querySelector('.ljf-co-filter-btn')?.addEventListener('click', e => {
+    pane.querySelector('#ljf-co-filter-btn')?.addEventListener('click', e => {
       e.stopPropagation();
-      companyFilterOpen = !companyFilterOpen;
-      const filterRow = pane.querySelector('#ljf-co-filter-row');
-      if (filterRow) filterRow.style.display = companyFilterOpen || companyFilter ? '' : 'none';
-      if (companyFilterOpen) pane.querySelector('#ljf-co-filter-input')?.focus();
+      if (filterMode !== 'company') {
+        filterMode = 'company'; filterValue = ''; filterOpen = true;
+        renderJobsPane();
+        document.getElementById('ljf-pane-jobs')?.querySelector('#ljf-filter-input')?.focus();
+      } else {
+        filterOpen = !filterOpen;
+        const filterRow = pane.querySelector('#ljf-co-filter-row');
+        if (filterRow) filterRow.style.display = (filterOpen || filterValue) ? '' : 'none';
+        if (filterOpen) pane.querySelector('#ljf-filter-input')?.focus();
+      }
     });
 
-    pane.querySelector('#ljf-co-filter-input')?.addEventListener('input', e => {
-      companyFilter = e.target.value;
-      applyCompanyFilter();
+    pane.querySelector('#ljf-ti-filter-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      if (filterMode !== 'title') {
+        filterMode = 'title'; filterValue = ''; filterOpen = true;
+        renderJobsPane();
+        document.getElementById('ljf-pane-jobs')?.querySelector('#ljf-filter-input')?.focus();
+      } else {
+        filterOpen = true;
+        const filterRow = pane.querySelector('#ljf-co-filter-row');
+        if (filterRow) filterRow.style.display = '';
+        pane.querySelector('#ljf-filter-input')?.focus();
+      }
+    });
+
+    pane.querySelector('#ljf-st-filter-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      if (filterMode !== 'status') {
+        filterMode = 'status'; filterValue = ''; filterOpen = true;
+        renderJobsPane();
+        document.getElementById('ljf-pane-jobs')?.querySelector('#ljf-filter-status-sel')?.focus();
+      } else {
+        filterOpen = !filterOpen;
+        const filterRow = pane.querySelector('#ljf-co-filter-row');
+        if (filterRow) filterRow.style.display = (filterOpen || filterValue) ? '' : 'none';
+        if (filterOpen) pane.querySelector('#ljf-filter-status-sel')?.focus();
+      }
+    });
+
+    pane.querySelector('#ljf-filter-input')?.addEventListener('input', e => {
+      filterValue = e.target.value;
+      applyFilters();
+    });
+
+    pane.querySelector('#ljf-filter-status-sel')?.addEventListener('change', e => {
+      filterValue = e.target.value;
+      applyFilters();
     });
 
     pane.querySelector('.ljf-co-filter-clear')?.addEventListener('click', () => {
-      companyFilter = '';
-      companyFilterOpen = false;
+      filterValue = '';
+      filterOpen = false;
       const filterRow = pane.querySelector('#ljf-co-filter-row');
       if (filterRow) filterRow.style.display = 'none';
-      applyCompanyFilter();
+      const inp = pane.querySelector('#ljf-filter-input');
+      const sel = pane.querySelector('#ljf-filter-status-sel');
+      if (inp) inp.value = '';
+      if (sel) sel.value = '';
+      applyFilters();
     });
 
-    applyCompanyFilter();
+    applyFilters();
 
     // Status dropdowns (jobs view only)
     if (!isDismView) {
@@ -1050,7 +1137,17 @@
     catch { return []; }
   }
 
+  function logEntryKey(e) {
+    return (e.company || '').toLowerCase() + '\x00' + (e.title || '').toLowerCase();
+  }
+
   function saveAppliedLog() {
+    try {
+      const stored = JSON.parse(GM_getValue(LOG_KEY, '[]'));
+      const ourKeys = new Set(appliedLog.map(logEntryKey));
+      const addedElsewhere = stored.filter(e => !ourKeys.has(logEntryKey(e)));
+      if (addedElsewhere.length) appliedLog = appliedLog.concat(addedElsewhere);
+    } catch {}
     GM_setValue(LOG_KEY, JSON.stringify(appliedLog));
     logIndex = buildLogIndex();
   }
@@ -1078,6 +1175,12 @@
     cutoff.setDate(cutoff.getDate() - dismissLogExpiry);
     const cutoffStr = [cutoff.getFullYear(), String(cutoff.getMonth() + 1).padStart(2, '0'), String(cutoff.getDate()).padStart(2, '0')].join('-');
     dismissLog = dismissLog.filter(e => !e.date || e.date >= cutoffStr);
+    try {
+      const stored = JSON.parse(GM_getValue(DISMISS_LOG_KEY, '[]'));
+      const ourKeys = new Set(dismissLog.map(logEntryKey));
+      const addedElsewhere = stored.filter(e => !ourKeys.has(logEntryKey(e)) && (!e.date || e.date >= cutoffStr));
+      if (addedElsewhere.length) dismissLog = dismissLog.concat(addedElsewhere);
+    } catch {}
     GM_setValue(DISMISS_LOG_KEY, JSON.stringify(dismissLog));
     dismissLogIndex = buildDismissLogIndex();
     updateDismissLogCount();
