@@ -42,7 +42,7 @@ The dismiss feature automates clicks on LinkedIn's native dismiss button. This c
 
 All available rule types are accessible from the **Add Rule** dropdown:
 
-![Rule type dropdown](Screenshots/rule-types.jpg)
+<img src="Screenshots/rule-types.jpg" alt="Rule type dropdown" width="360">
 
 | Type | What it matches |
 |---|---|
@@ -163,7 +163,7 @@ Badges appear on the job detail page too, not just on list cards. If a job match
 
 Open the gear icon in the panel header to access the settings modal.
 
-![Settings](Screenshots/settings.jpg)
+<img src="Screenshots/settings.jpg" alt="Settings" width="380">
 
 | Setting | Default | Description |
 |---|---|---|
@@ -179,13 +179,13 @@ Open the gear icon in the panel header to access the settings modal.
 
 The **Colors** tab lets you override the default highlight color for each card state. Dark-mode and light-mode variants are configurable independently, with live preview swatches:
 
-![Color customization](Screenshots/settings-colors.jpg)
+<img src="Screenshots/settings-colors.jpg" alt="Color customization" width="380">
 
 ### Backup & restore
 
 The **Backup** tab exports and imports rules and log data as JSON, with a toggle to include the dismiss log in the export. The application log can also be exported as CSV, and a downloadable template is provided if you want to build your log from scratch:
 
-![Backup and restore](Screenshots/settings-backup.jpg)
+<img src="Screenshots/settings-backup.jpg" alt="Backup and restore" width="380">
 
 ---
 
