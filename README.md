@@ -1,10 +1,10 @@
 # LinkedIn Jobs Curator
 
-A Violentmonkey userscript that brings rule-based filtering, highlights, and an application tracker to LinkedIn job search. Every card on the page is automatically scanned and badged based on your rules — companies you've dismissed before are re-flagged, companies you've applied to show how long ago, and salary rules surface or bury cards by pay range.
+A Violentmonkey userscript that brings rule-based filtering, highlights, and an application tracker to LinkedIn job search. Every card on the page is automatically scanned and badged based on your rules: companies you've dismissed before are re-flagged, companies you've applied to show how long ago, cards will flag and highlight based on rules you set, and salary rules surface or bury cards by pay range.
 
 ## Browser compatibility
 
-**Firefox only.** Chrome is intentionally not supported — LinkedIn's anti-automation protections block the DOM access the script relies on in Chromium-based browsers, and working around those protections risks account suspension.
+**Firefox only.** Chrome is intentionally not supported. LinkedIn's anti-automation protections block the DOM access the script relies on in Chromium-based browsers, and working around those protections risks account suspension.
 
 ## Installation
 
@@ -18,17 +18,25 @@ A Violentmonkey userscript that brings rule-based filtering, highlights, and an 
 
 ![Overview — rules panel and job list](Screenshots/highlight-rules.jpg)
 
-The panel has two tabs: **Rules** (filter and highlight configuration) and **Jobs** (your application log). Cards are scanned automatically as they appear — each one gets a colored border and one or more badges describing why it was flagged. The panel can be minimized to a slim tab strip while you browse.
+The panel has two tabs: **Rules** (filter and highlight configuration) and **Jobs** (your application log). Cards are scanned automatically as they appear, each one gets a colored border and one or more badges describing why it was flagged. The panel can be minimized to a slim tab strip while you browse.
 
 ---
 
 ## Flag rules
 
-Flag rules highlight matching cards in red and, optionally, auto-click LinkedIn's native dismiss button to remove them from your feed. Rules target company name, job title, location, or salary range.
+Flag rules color matching cards in red and. Rules target company name, job title, location, or salary range.
 
 ![Flag rules panel](Screenshots/flag-rules.jpg)
 
 The flag rules section groups all active rules by type. Built-in sticky rules handle cards LinkedIn has already marked **Applied** and any job in your application log. Salary rules let you set a floor on the top-end or base salary listed in a posting.
+
+### Programmatic dismiss action
+
+When enabled makes all flagged cards available for dimissal. Using an action on a specific rule, or the dismiss all action (x) on the quick tab, all currently flagged cards will be dismissed. Note: As cards lazy load on scroll, you'll need to scroll to the bottom of the paginated search to flag all potential cards.
+
+#### Dismiss actions note
+
+The dismiss feature automates clicks on LinkedIn's native dismiss button. This constitutes automated interaction with their platform and likely violates the LinkedIn User Agreement. It is disabled by default and requires explicit opt-in. Use at your own discretion.
 
 ### Rule types
 
@@ -49,17 +57,21 @@ All available rule types are accessible from the **Add Rule** dropdown:
 | Top Salary Above ($k) | Cards whose listed max salary is at or above your threshold |
 | Salary Above ($k) | Cards whose base salary is at or above your threshold |
 
+### Salary Note
+
+Salary bands are aligned to yearly, but will calculate vs yearly, monthly, and hourly ranges in the card header, or yearly from within the job description content.
+
 ### Card badges
 
 Each matched card gets a colored border and a badge naming the rule that fired. Multiple rules can badge the same card simultaneously.
 
 <img src="Screenshots/dismiss-company-card.jpg" alt="Company dismiss badge" width="640">
 
-A company flag rule fires on the company name. The badge shows exactly which rule matched — useful when you have dozens of rules and want to know why a card was flagged.
+A company flag rule fires on the company name. The badge shows exactly which rule matched: useful when you have dozens of rules and want to know why a card was flagged.
 
 <img src="Screenshots/dismiss-title-card.jpg" alt="Title dismiss badge" width="640">
 
-A title keyword rule fires on any match in the job title. This card also has an application log badge — both rules fire independently and stack on the same card.
+A title keyword rule fires on any match in the job title. This card also has an application log badge. Both rules fire independently and stack on the same card.
 
 ---
 
@@ -87,7 +99,7 @@ Cards from companies you applied to recently (within your configured reapply win
 
 <img src="Screenshots/last-applied-expired.jpg" alt="Applied card — past reapply window" width="640">
 
-Once you're past the reapply window, the card loses its yellow tint and the badge switches to a green **✓** — safe to apply again.
+Once you're past the reapply window, the card loses its yellow tint and the badge switches to a grey, marking it safe to apply again.
 
 The **Jobs** tab shows your full log with sortable, filterable columns for company, title, applied date, age, and status:
 
@@ -107,7 +119,7 @@ The footer also shows aggregate stats across your entire log: total applications
 
 ## Dismiss log
 
-Every time you dismiss a card — via the hover menu, a flag rule, or the quick dismiss button — the company and title are saved to a dismiss log. On future visits, cards matching the log are automatically re-flagged.
+Every time you dismiss a card — via the hover menu, a flag rule, or the quick dismiss button, the company and title are saved to a dismiss log. On future visits, cards matching the log are automatically re-flagged.
 
 <img src="Screenshots/dismiss-grey.jpg" alt="Re-flagged dismissed card (grey)" width="640">
 
@@ -123,17 +135,19 @@ Dismiss log entries expire after a configurable number of days (default: 180). T
 
 ## Quick hover menu
 
-Hovering a card shows a three-button action menu: **+** adds a highlight rule for this company, **−** adds a flag rule, and **»** jumps to the next matching card.
+Hovering a card shows a three-button action menu: **+** adds a highlight rule for this company, **−** adds a flag rule for the company, and **»** dismisses all seen cards from the same company on the page.
 
 <img src="Screenshots/quick-menu.jpg" alt="Hover quick menu" width="640">
 
-The active **quick dismiss mode** — configurable via the panel footer — determines whether **−** dismisses by company, title, or location. A badge on the card previews exactly what rule will be created before you click.
+## Quick tab menu
 
 The vertical tab strip on the right edge summarizes the current page at a glance:
 
 <img src="Screenshots/quick-tab.jpg" alt="Status tab strip" width="70">
 
-The traffic-light indicators show counts for dismissed (red), recently applied (yellow), and highlighted (green) cards currently visible on the page.
+The traffic-light indicators show counts for flagged (red), recently applied (yellow), and highlighted (green) cards currently visible on the page.
+
+Use the red **x** to optionally dismiss all flagged cards, or the yellow **o** to toggle to hide all yellow and dismissed cards to reduce visual clutter.
 
 ---
 
@@ -172,12 +186,6 @@ The **Colors** tab lets you override the default highlight color for each card s
 The **Backup** tab exports and imports rules and log data as JSON, with a toggle to include the dismiss log in the export. The application log can also be exported as CSV, and a downloadable template is provided if you want to build your log from scratch:
 
 ![Backup and restore](Screenshots/settings-backup.jpg)
-
----
-
-## Dismiss actions note
-
-The dismiss feature automates clicks on LinkedIn's native dismiss button. This constitutes automated interaction with their platform and likely violates the LinkedIn User Agreement. It is disabled by default and requires explicit opt-in. Use at your own discretion.
 
 ---
 
