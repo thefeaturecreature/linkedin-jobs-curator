@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.6.7
+// @version      1.6.8
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -4275,9 +4275,11 @@ function setupApplyCapture() {
         if (card) resetCard(card);
         setTimeout(() => { clearHighlights(); applyAllRules(); }, 400);
       }
-      // Capture native X dismiss button clicks to log the dismissal
+      // Capture native X dismiss button clicks to log the dismissal.
+      // Guard against modal close buttons (Easy Apply, network popup) that match
+      // DISMISS_SEL but should not trigger a dismissal log entry.
       const dismissBtn = e.target.closest(DISMISS_SEL);
-      if (dismissBtn) {
+      if (dismissBtn && !dismissBtn.closest('[role="dialog"]')) {
         const card = dismissBtn.closest(CARD_SEL);
         if (card && !isDismissed(card)) {
           logDismissal(card);
