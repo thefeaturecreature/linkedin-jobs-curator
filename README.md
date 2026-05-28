@@ -143,7 +143,7 @@ Hovering a card shows a three-button action menu: **+** adds a highlight rule fo
 
 The vertical tab strip on the right edge summarizes the current page at a glance:
 
-<img src="Screenshots/quick-tab.jpg" alt="Status tab strip" width="70">
+<img src="Screenshots/quick-tab.jpg" alt="Status tab strip" width="45">
 
 The traffic-light indicators show counts for flagged (red), recently applied (yellow), and highlighted (green) cards currently visible on the page.
 
