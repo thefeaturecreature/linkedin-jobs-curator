@@ -65,11 +65,11 @@ Salary bands are aligned to yearly, but will calculate vs yearly, monthly, and h
 
 Each matched card gets a colored border and a badge naming the rule that fired. Multiple rules can badge the same card simultaneously.
 
-<img src="Screenshots/dismiss-company-card.jpg" alt="Company dismiss badge" width="640">
+<img src="Screenshots/dismiss-company-card.jpg" alt="Company dismiss badge" width="500">
 
 A company flag rule fires on the company name. The badge shows exactly which rule matched: useful when you have dozens of rules and want to know why a card was flagged.
 
-<img src="Screenshots/dismiss-title-card.jpg" alt="Title dismiss badge" width="640">
+<img src="Screenshots/dismiss-title-card.jpg" alt="Title dismiss badge" width="500">
 
 A title keyword rule fires on any match in the job title. This card also has an application log badge. Both rules fire independently and stack on the same card.
 
@@ -79,7 +79,7 @@ A title keyword rule fires on any match in the job title. This card also has an 
 
 Highlight rules work the same way as flag rules but mark cards green. Use them to surface roles from target companies, specific title keywords, or salary thresholds.
 
-<img src="Screenshots/highlight-salary.jpg" alt="Salary highlight badge" width="640">
+<img src="Screenshots/highlight-salary.jpg" alt="Salary highlight badge" width="500">
 
 Salary highlight rules badge matching cards with the threshold that matched, so you can tell at a glance which rule surfaced each card.
 
@@ -93,11 +93,11 @@ Highlight rules work on every page that shows job cards — including the **Top 
 
 Auto-captures Easy Apply applications as you submit them, and external applications when you click **Yes** on LinkedIn's "Did you apply?" prompt. Badges cards from companies you've previously applied to with date and days elapsed. You can also import an existing log via CSV or JSON to seed your history.
 
-<img src="Screenshots/last-applied-close.jpg" alt="Recently applied card — within reapply window" width="640">
+<img src="Screenshots/last-applied-close.jpg" alt="Recently applied card — within reapply window" width="500">
 
 Cards from companies you applied to recently (within your configured reapply window, default 14 days) are highlighted yellow. The **✗** icon means you're still inside the window.
 
-<img src="Screenshots/last-applied-expired.jpg" alt="Applied card — past reapply window" width="640">
+<img src="Screenshots/last-applied-expired.jpg" alt="Applied card — past reapply window" width="500">
 
 Once you're past the reapply window, the card loses its yellow tint and the badge switches to a grey, marking it safe to apply again.
 
@@ -107,11 +107,11 @@ The **Jobs** tab shows your full log with sortable, filterable columns for compa
 
 Each column header has a per-column filter. A search bar at the top of the pane lets you search across all columns at once:
 
-![Log filtered by company](Screenshots/filters.jpg)
+<img src="Screenshots/filters.jpg" alt="Log filtered by company" width="700">
 
 New entries can be added directly from the panel footer — fill in company, title, date, and status, then hit **Save**:
 
-![Add log entry inline](Screenshots/company-add-edit.jpg)
+<img src="Screenshots/company-add-edit.jpg" alt="Add log entry inline" width="700">
 
 The footer also shows aggregate stats across your entire log: total applications, response rate, ghosted percentage, and active interview count.
 
@@ -121,11 +121,11 @@ The footer also shows aggregate stats across your entire log: total applications
 
 Every time you dismiss a card — via the hover menu, a flag rule, or the quick dismiss button, the company and title are saved to a dismiss log. On future visits, cards matching the log are automatically re-flagged.
 
-<img src="Screenshots/dismiss-grey.jpg" alt="Re-flagged dismissed card (grey)" width="640">
+<img src="Screenshots/dismiss-grey.jpg" alt="Re-flagged dismissed card (grey)" width="500">
 
 By default re-flagged cards get a grey border and a badge showing how long ago you dismissed them. This keeps previously-dismissed jobs visible without conflating them with active flag-rule matches.
 
-<img src="Screenshots/dismiss-red.jpg" alt="Re-flagged dismissed card (red)" width="640">
+<img src="Screenshots/dismiss-red.jpg" alt="Re-flagged dismissed card (red)" width="500">
 
 The **Flag dismiss log cards** setting switches the re-flag color from grey to red.
 
@@ -137,7 +137,7 @@ Dismiss log entries expire after a configurable number of days (default: 180). T
 
 Hovering a card shows a three-button action menu: **+** adds a highlight rule for this company, **−** adds a flag rule for the company, and **»** dismisses all seen cards from the same company on the page.
 
-<img src="Screenshots/quick-menu.jpg" alt="Hover quick menu" width="640">
+<img src="Screenshots/quick-menu.jpg" alt="Hover quick menu" width="500">
 
 ## Quick tab menu
 
@@ -155,7 +155,7 @@ Use the red **x** to optionally dismiss all flagged cards, or the yellow **o** t
 
 Badges appear on the job detail page too, not just on list cards. If a job matches a highlight rule or you've previously applied to the company, the badge shows in the top-right corner of the posting header.
 
-![Job detail page with badges](Screenshots/job-view.jpg)
+<img src="Screenshots/job-view.jpg" alt="Job detail page with badges" width="700">
 
 ---
 
