@@ -46,9 +46,9 @@
     applied:          { label: 'Already Applied',          match: matchApplied          },
     topsalarybelow:   { label: 'Top Salary Below ($k)',     match: matchTopSalary        },
     salarybelow:      { label: 'Salary Below ($k)',          match: matchSalary           },
-    companydismiss:   { label: 'Company to Dismiss',        match: matchCompany           },
-    titledismiss:     { label: 'Title to Dismiss',          match: matchTitle             },
-    locationdismiss:  { label: 'Location to Dismiss',       match: matchLocation          },
+    companydismiss:   { label: 'Company to Flag',           match: matchCompany           },
+    titledismiss:     { label: 'Title to Flag',             match: matchTitle             },
+    locationdismiss:  { label: 'Location to Flag',          match: matchLocation          },
     companyhi:        { label: 'Company to Highlight',      match: matchCompanyHi,    highlight: true },
     titlehi:          { label: 'Title to Highlight',        match: matchTitleHi,      highlight: true },
     locationhi:       { label: 'Location to Highlight',     match: matchLocationHi,   highlight: true },
@@ -2915,12 +2915,19 @@
     const content = document.createElement('div');
     content.style.cssText = 'padding:16px 18px;min-height:140px;';
 
-    function mkRow(labelText, control) {
+    function mkRow(labelText, control, tooltip) {
       const row = document.createElement('label');
       row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;cursor:pointer;';
       const lbl = document.createElement('span');
-      lbl.style.cssText = `font-size:12px;color:${th.panelText};`;
+      lbl.style.cssText = `font-size:12px;color:${th.panelText};display:flex;align-items:center;gap:5px;`;
       lbl.textContent = labelText;
+      if (tooltip) {
+        const info = document.createElement('span');
+        info.textContent = 'ⓘ';
+        info.title = tooltip;
+        info.style.cssText = `color:${th.countText};cursor:default;font-size:11px;flex-shrink:0;`;
+      lbl.appendChild(info);
+      }
       row.appendChild(lbl);
       row.appendChild(control);
       return row;
@@ -3043,15 +3050,36 @@
         });
         content.appendChild(restoreBtn);
       } else if (activeTab === 'Settings') {
-        content.appendChild(mkRow('Dark Mode', mkToggle(darkMode, checked => {
-          if (checked !== darkMode) { overlay.remove(); toggleDarkMode(); }
-        })));
+        content.appendChild(mkRow('Enable Dismiss Actions', mkToggle(dismissActionsEnabled, checked => {
+          if (checked && !dismissActionsEnabled) {
+            overlay.remove();
+            confirmDismissActionsEnable(() => {
+              dismissActionsEnabled = true;
+              GM_setValue('ljf_dismissActions', 'true');
+              buildPanelContent();
+              updateTabCount();
+            });
+          } else {
+            dismissActionsEnabled = checked;
+            GM_setValue('ljf_dismissActions', checked ? 'true' : 'false');
+            overlay.remove();
+            buildPanelContent();
+            updateTabCount();
+          }
+        }), 'Auto-clicks LinkedIn\'s native dismiss button on cards matched by flag rules. Disabled by default, this constitutes automated interaction with LinkedIn and may violate their User Agreement.'));
+        content.appendChild(divider());
+        content.appendChild(mkRow('Flag dismiss log cards', mkToggle(dismissLogCardsRed, checked => {
+          dismissLogCardsRed = checked;
+          GM_setValue('ljf_dismissLogCardsRed', checked ? 'true' : 'false');
+          clearHighlights();
+          applyAllRules();
+        }), 'Shows dismiss log cards in red (flagged) instead of grey. When Dismiss Actions is enabled, flagged cards are also eligible for auto-dismissal.'));
         content.appendChild(divider());
         content.appendChild(divider());
         content.appendChild(mkRow('Quick Hover Menu', mkToggle(hoverMenuEnabled, checked => {
           hoverMenuEnabled = checked;
           GM_setValue('ljf_hoverMenu', checked ? 'true' : 'false');
-        })));
+        }), 'Show +/−/» action buttons when hovering a job card x button. The + highlights the company, − adds a flag rule for the company, » dismisses all cards for the same company.'));
         content.appendChild(divider());
         (() => {
           const inp = document.createElement('input');
@@ -3072,15 +3100,8 @@
             clearHighlights();
             applyAllRules();
           });
-          content.appendChild(mkRow('Reapply after (days)', inp));
+          content.appendChild(mkRow('Reapply after (days)', inp, 'Days after applying to a company before the badge switches from ✗ to ✓, indicating it\'s safe to reapply. Default: 14.'));
         })();
-        content.appendChild(divider());
-        content.appendChild(mkRow('Hide recently applied companies', mkToggle(hideRecentlyApplied, checked => {
-          hideRecentlyApplied = checked;
-          GM_setValue('ljf_hideRecentlyApplied', checked ? 'true' : 'false');
-          applyRecentlyAppliedVisibility();
-          updateTabCount();
-        })));
         content.appendChild(divider());
         (() => {
           const inp = document.createElement('input');
@@ -3099,38 +3120,18 @@
             dismissLogExpiry = v;
             GM_setValue('ljf_dismissLogExpiry', String(v));
           });
-          content.appendChild(mkRow('Dismiss log expiry (days)', inp));
+          content.appendChild(mkRow('Dismiss log expiry (days)', inp, 'How many days before a dismissed job is removed from the dismiss log and stops being re-flagged on future visits. Default: 180.'));
         })();
         content.appendChild(divider());
         content.appendChild(mkRow('Match location when re-flagging', mkToggle(dismissLogMatchLocation, checked => {
           dismissLogMatchLocation = checked;
           GM_setValue('ljf_dismissLogMatchLocation', checked ? 'true' : 'false');
-        })));
+        }), 'When re-flagging cards from the dismiss log, also require the location to match. Useful if a remote listing you dismissed has since added a separate office role.'));
         content.appendChild(divider());
-        content.appendChild(mkRow('Dismissed log cards red', mkToggle(dismissLogCardsRed, checked => {
-          dismissLogCardsRed = checked;
-          GM_setValue('ljf_dismissLogCardsRed', checked ? 'true' : 'false');
-          clearHighlights();
-          applyAllRules();
-        })));
         content.appendChild(divider());
-        content.appendChild(mkRow('Dismiss Actions', mkToggle(dismissActionsEnabled, checked => {
-          if (checked && !dismissActionsEnabled) {
-            overlay.remove();
-            confirmDismissActionsEnable(() => {
-              dismissActionsEnabled = true;
-              GM_setValue('ljf_dismissActions', 'true');
-              buildPanelContent();
-              updateTabCount();
-            });
-          } else {
-            dismissActionsEnabled = checked;
-            GM_setValue('ljf_dismissActions', checked ? 'true' : 'false');
-            overlay.remove();
-            buildPanelContent();
-            updateTabCount();
-          }
-        })));
+        content.appendChild(mkRow('Dark Mode', mkToggle(darkMode, checked => {
+          if (checked !== darkMode) { overlay.remove(); toggleDarkMode(); }
+        }), 'Toggle between dark and light panel themes.'));
       } else {
         const grid = document.createElement('div');
         grid.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
@@ -3715,9 +3716,9 @@
     const titleHi          = rules.filter(r => r.type === 'titlehi');
     const locationHi       = rules.filter(r => r.type === 'locationhi');
 
-    // ── Dismiss Rules ─────────────────────────────────────────────────────────
+    // ── Flag Rules ────────────────────────────────────────────────────────────
     const dCollapsed = collapsedSections.dismissSection;
-    list.appendChild(renderSectionHeader('Dismiss Rules', 'dismissSection', ['companydismiss', 'titledismiss', 'locationdismiss']));
+    list.appendChild(renderSectionHeader('Flag Rules', 'dismissSection', ['companydismiss', 'titledismiss', 'locationdismiss']));
     if (!dCollapsed) {
       list.appendChild(renderAppliedBlock(rules.find(r => r.type === 'applied')));
       list.appendChild(renderJobLogBlock());
@@ -4073,7 +4074,7 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
     }
 
     const qdBtn            = makeBtn('\u00BB', 'Quick dismiss this company', '#d4b896', '#6b3a1f');
-    const dismissPlusBtn   = makeBtn('\u2212', 'Add to dismiss rules',        '#fecaca', '#991b1b');
+    const dismissPlusBtn   = makeBtn('\u2212', 'Add to flag rules',           '#fecaca', '#991b1b');
     const highlightPlusBtn = makeBtn('+',      'Add to highlight rules',       '#bbf7d0', '#166534');
 
     menu.appendChild(highlightPlusBtn);
@@ -4159,7 +4160,7 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
       applyAllRules();
       const dismissed = dismissRule(newRule);
       if (panelOpen) renderRules();
-      setStatus('Dismiss rule added \u2014 ' + dismissed + ' card(s) dismissed for ' + company);
+      setStatus('Flag rule added \u2014 ' + dismissed + ' card(s) dismissed for ' + company);
     });
 
     highlightPlusBtn.addEventListener('click', e => {
