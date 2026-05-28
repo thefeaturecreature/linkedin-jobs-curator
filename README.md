@@ -79,7 +79,7 @@ Highlight rules work on every page that shows job cards — including the **Top 
 
 ## Application log
 
-Import a CSV or JSON of your applied jobs. The script cross-references every visible card against the log and badges matching cards with the application date and days elapsed.
+Auto-captures Easy Apply applications as you submit them, and external applications when you click **Yes** on LinkedIn's "Did you apply?" prompt. Badges cards from companies you've previously applied to with date and days elapsed. You can also import an existing log via CSV or JSON to seed your history.
 
 <img src="Screenshots/last-applied-close.jpg" alt="Recently applied card — within reapply window" width="640">
 
