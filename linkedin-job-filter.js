@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.6.8
+// @version      1.6.9
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -1087,22 +1087,26 @@
       if (isDismView) {
         const location = pane.querySelector('#ljf-aj-location')?.value.trim() || '';
         if (editingDismissLogIdx !== null && dismissLog[editingDismissLogIdx]) {
+          const oldKey = logEntryKey(dismissLog[editingDismissLogIdx]);
           Object.assign(dismissLog[editingDismissLogIdx], { company, title, location, date });
           editingDismissLogIdx = null;
+          saveDismissLog(oldKey);
         } else {
           dismissLog.push({ jobId: null, company, title, location, date });
+          saveDismissLog();
         }
-        saveDismissLog();
       } else {
         const status = pane.querySelector('#ljf-aj-status')?.value || 'applied';
         const url    = pane.querySelector('#ljf-aj-url')?.value.trim();
         if (editingLogIdx !== null && appliedLog[editingLogIdx]) {
+          const oldKey = logEntryKey(appliedLog[editingLogIdx]);
           Object.assign(appliedLog[editingLogIdx], { company, title, date, url, status });
           editingLogIdx = null;
+          saveAppliedLog(oldKey);
         } else {
           appliedLog.push({ company, title, date, url, status, statusDate: today });
+          saveAppliedLog();
         }
-        saveAppliedLog();
       }
       clearHighlights();
       applyAllRules();
@@ -1141,11 +1145,14 @@
     return (e.company || '').toLowerCase() + '\x00' + (e.title || '').toLowerCase();
   }
 
-  function saveAppliedLog() {
+  function saveAppliedLog(excludeKey) {
     try {
       const stored = JSON.parse(GM_getValue(LOG_KEY, '[]'));
       const ourKeys = new Set(appliedLog.map(logEntryKey));
-      const addedElsewhere = stored.filter(e => !ourKeys.has(logEntryKey(e)));
+      const addedElsewhere = stored.filter(e => {
+        const k = logEntryKey(e);
+        return !ourKeys.has(k) && k !== excludeKey;
+      });
       if (addedElsewhere.length) appliedLog = appliedLog.concat(addedElsewhere);
     } catch {}
     GM_setValue(LOG_KEY, JSON.stringify(appliedLog));
@@ -1170,7 +1177,7 @@
     catch { return []; }
   }
 
-  function saveDismissLog() {
+  function saveDismissLog(excludeKey) {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - dismissLogExpiry);
     const cutoffStr = [cutoff.getFullYear(), String(cutoff.getMonth() + 1).padStart(2, '0'), String(cutoff.getDate()).padStart(2, '0')].join('-');
@@ -1178,7 +1185,10 @@
     try {
       const stored = JSON.parse(GM_getValue(DISMISS_LOG_KEY, '[]'));
       const ourKeys = new Set(dismissLog.map(logEntryKey));
-      const addedElsewhere = stored.filter(e => !ourKeys.has(logEntryKey(e)) && (!e.date || e.date >= cutoffStr));
+      const addedElsewhere = stored.filter(e => {
+        const k = logEntryKey(e);
+        return !ourKeys.has(k) && k !== excludeKey && (!e.date || e.date >= cutoffStr);
+      });
       if (addedElsewhere.length) dismissLog = dismissLog.concat(addedElsewhere);
     } catch {}
     GM_setValue(DISMISS_LOG_KEY, JSON.stringify(dismissLog));
