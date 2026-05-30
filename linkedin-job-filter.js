@@ -994,8 +994,9 @@
           if (!entry) return;
           const label = [entry.company, entry.title].filter(Boolean).join(' — ') || 'this entry';
           if (!confirm('Delete "' + label + '" from the dismiss log?')) return;
+          const deletedKey = logEntryKey(entry);
           dismissLog.splice(idx, 1);
-          saveDismissLog();
+          saveDismissLog(deletedKey);
           clearHighlights();
           applyAllRules();
           renderJobsPane();
@@ -1005,8 +1006,9 @@
           if (!entry) return;
           const label = [entry.company, entry.title].filter(Boolean).join(' — ') || 'this entry';
           if (!confirm('Delete "' + label + '" from the job log?')) return;
+          const deletedKey = logEntryKey(entry);
           appliedLog.splice(idx, 1);
-          saveAppliedLog();
+          saveAppliedLog(deletedKey);
           clearHighlights();
           applyAllRules();
           renderJobsPane();
