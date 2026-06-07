@@ -61,6 +61,10 @@ Notable functions in `linkedin-job-filter.js`.
 | `matchCompany(card, rule)` | Company name substring match |
 | `matchTitle(card, rule)` | Title keyword match (normalizes "Sr." → "Senior") |
 | `matchLocation(card, rule)` | Location keyword match via SALARY_SEL metadata |
+| `parseSalaries(card)` | Parse annualized salary values from card DOM; falls back to `ljfDetailSalaries` dataset cache if card has none |
+| `parseSalaryDisplayText(text)` | Formats salary matches from raw text into a compact display string (e.g. `$154k - $190k`, `$34/hr`) |
+| `getSalaryDisplay(card)` | Returns compact display string from card DOM salary elements or `ljfDetailSalaryDisplay` cache |
+| `salaryBadgeLabel(rule, display)` | Appends detected salary in parens to salary rule badge labels |
 | `matchSalary(card, rule)` / `matchTopSalary` | Salary floor checks |
 | `matchSalaryAbove(card, rule)` / `matchTopSalaryAbove` | Salary ceiling checks |
 
@@ -77,7 +81,10 @@ Notable functions in `linkedin-job-filter.js`.
 | Function | Description |
 |---|---|
 | `applyCardRules(card)` | Apply all rules to one card; returns match count |
-| `applyAllRules()` | Full pass: rules → job log → dismiss log → visibility → tab count |
+| `parseSearchDetailSalaries()` | Extract salary from the search page detail panel; returns `{ values, display }` — values are annualized, display is a compact string like `$154k - $190k` |
+| `getViewPageSalaryDisplay(hero)` | Returns compact salary display string for the view page hero (checks hero text first, then description) |
+| `applyDetailPanelSalary()` | On list/search pages, extract salary from the right-side detail panel and cache both `ljfDetailSalaries` (annualized) and `ljfDetailSalaryDisplay` (formatted) on the active card |
+| `applyAllRules()` | Full pass: detail-panel salary → rules → job log → dismiss log → visibility → tab count |
 | `applyJobLog()` | Apply applied log matching to all cards |
 | `applyDismissLog()` | Apply dismiss log matching to all cards |
 | `applyRecentlyAppliedVisibility()` | Hide/show yellow+dismissed+grey-dismisslog cards per toggle |
