@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.6.9
+// @version      1.7.0
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -167,6 +167,7 @@
   let dismissLogExpiry      = Math.max(1, parseInt(GM_getValue('ljf_dismissLogExpiry', '180'), 10) || 180);
   let dismissLogMatchLocation = GM_getValue('ljf_dismissLogMatchLocation', 'false') === 'true';
   let dismissLogCardsRed    = GM_getValue('ljf_dismissLogCardsRed', 'false') === 'true';
+  let flagMatchingCompanies = GM_getValue('ljf_flagMatchingCompanies', 'true') !== 'false';
   let userColors = (() => {
     try { return { ...COLOR_DEFAULTS, ...JSON.parse(GM_getValue('ljf_colors', '{}')) }; }
     catch (e) { return { ...COLOR_DEFAULTS }; }
@@ -1321,6 +1322,7 @@
   }
 
   // Returns all salary values (annualized) found across all salary elements on a card.
+  // Falls back to salary cached from the right-side detail panel (ljfDetailSalaries dataset).
   function parseSalaries(card) {
     const items = card.querySelectorAll(SALARY_SEL);
     const all = [];
@@ -1334,6 +1336,10 @@
         if (m[2] && /[Kk]/.test(m[2])) amount *= 1000;
         all.push(toAnnual(amount, normalizeUnit(m[3])));
       }
+    }
+    if (all.length > 0) return all;
+    if (card.dataset.ljfDetailSalaries) {
+      try { return JSON.parse(card.dataset.ljfDetailSalaries); } catch (e) {}
     }
     return all;
   }
@@ -1361,12 +1367,40 @@
     return all;
   }
 
+  // Formats salary matches from raw text into a compact display string: "$154k - $190k", "$34/hr", "$10k/mo".
+  function parseSalaryDisplayText(text) {
+    const parts = [];
+    const regex = /\$([\d,]+(?:\.\d+)?)([Kk])(?:\s*(?:[\/\\]\s*)?(yr|year|mo|month|hr|hour))?|\$(\d{1,3}(?:,\d{3})+)(?:\s*(?:[\/\\]\s*)?(yr|year|mo|month|hr|hour))?/g;
+    let m;
+    while ((m = regex.exec(text))) {
+      let amount, unit;
+      if (m[2]) { amount = parseFloat(m[1].replace(/,/g, '')) * 1000; unit = m[3]; }
+      else       { amount = parseFloat(m[4].replace(/,/g, ''));        unit = m[5]; }
+      if (isNaN(amount)) continue;
+      const normUnit = normalizeUnit(unit);
+      const kAmt = amount >= 1000 ? Math.round(amount / 1000) + 'k' : String(Math.round(amount));
+      let disp = '$' + kAmt;
+      if (normUnit === 'hr')       disp += '/hr';
+      else if (normUnit === 'mo')  disp += '/mo';
+      parts.push(disp);
+    }
+    if (!parts.length) return '';
+    return parts.length === 1 ? parts[0] : parts[0] + ' - ' + parts[parts.length - 1];
+  }
+
   // For job view pages: checks hero textContent first (salary pill), then the job description body.
   function parseViewPageSalaries(hero) {
     const heroSalaries = parseSalaryText(hero ? hero.textContent : '');
     if (heroSalaries.length > 0) return heroSalaries;
     const aboutEl = document.querySelector('[componentkey^="JobDetails_AboutTheJob_"]');
     return aboutEl ? parseSalaryText(aboutEl.textContent) : [];
+  }
+
+  function getViewPageSalaryDisplay(hero) {
+    const d = parseSalaryDisplayText(hero ? hero.textContent : '');
+    if (d) return d;
+    const aboutEl = document.querySelector('[componentkey^="JobDetails_AboutTheJob_"]');
+    return aboutEl ? parseSalaryDisplayText(aboutEl.textContent) : '';
   }
 
   function matchSalary(card, rule) {
@@ -1381,6 +1415,23 @@
     if (isNaN(threshold)) return false;
     const s = parseSalaries(card);
     return s.length > 0 && Math.max(...s) < threshold;
+  }
+
+  // Returns compact salary display string from card DOM elements or cached detail panel data.
+  function getSalaryDisplay(card) {
+    for (const el of card.querySelectorAll(SALARY_SEL)) {
+      if (!el.textContent.includes('$')) continue;
+      const d = parseSalaryDisplayText(el.textContent);
+      if (d) return d;
+    }
+    return card.dataset.ljfDetailSalaryDisplay || '';
+  }
+
+  // For salary rule badges, appends the detected salary range in parens.
+  function salaryBadgeLabel(rule, display) {
+    const isSalary = rule.type === 'salarybelow' || rule.type === 'topsalarybelow' ||
+                     rule.type === 'salaryabove' || rule.type === 'topsalaryabove';
+    return (isSalary && display) ? rule.label + ' (' + display + ')' : rule.label;
   }
 
   // Word-boundary company match: "Flex" won't match "Flexible", "Ro" won't match "ProKatchers", etc.
@@ -1526,8 +1577,9 @@
 
     // Add badges first — their DOM mutation may trigger a LinkedIn SPA re-render
     // that clears inline styles, so we set background-color after.
-    for (const rule of shownDismiss)   addBadge(card, '\u26F3 ' + rule.label, CC.dismissBadge);
-    for (const rule of shownHighlight) addBadge(card, '\u2605 ' + rule.label, CC.highlightBadge);
+    const salaryDisp = getSalaryDisplay(card);
+    for (const rule of shownDismiss)   addBadge(card, '\u26F3 ' + (rule.type === 'applied' ? 'Previously Applied' : salaryBadgeLabel(rule, salaryDisp)), CC.dismissBadge);
+    for (const rule of shownHighlight) addBadge(card, '\u2605 ' + salaryBadgeLabel(rule, salaryDisp), CC.highlightBadge);
 
     // Card color: dismiss (red) beats highlight (green).
     if (shownDismiss.length) {
@@ -1536,7 +1588,7 @@
       card.style.setProperty('box-sizing', 'border-box', 'important');
       clearInnerBorder(card);
       card.dataset.ljfHighlighted = shownDismiss[0].id;
-    } else {
+    } else if (!card.dataset.ljfJobLog) {
       card.style.setProperty('background-color', CC.highlightBg, 'important');
       card.style.setProperty('border-left', '3px solid ' + CC.highlightBorder, 'important');
       card.style.setProperty('box-sizing', 'border-box', 'important');
@@ -1548,10 +1600,55 @@
     return dismissMatches.length + highlightMatches.length;
   }
 
+  // Extract salary from the search page's right-side detail panel.
+  // The view page uses componentkey-based selectors; the search page uses class-based ones.
+  function parseSearchDetailSalaries() {
+    // Try the top card first (salary pill shown above the description)
+    const topCard = document.querySelector('.job-details-jobs-unified-top-card__container--two-pane, .jobs-unified-top-card');
+    if (topCard) {
+      const s = parseSalaryText(topCard.textContent);
+      if (s.length) return { values: s, display: parseSalaryDisplayText(topCard.textContent) };
+    }
+    // Fall back to the full description (salary sometimes only in body text)
+    const desc = document.querySelector(
+      '.job-details-about-the-job-module__description, .jobs-details__main-content, .jobs-search__job-details--wrapper'
+    );
+    if (!desc) return { values: [], display: '' };
+    return { values: parseSalaryText(desc.textContent), display: parseSalaryDisplayText(desc.textContent) };
+  }
+
+  // On search/list pages: extract salary from the right-side detail panel and cache it on the
+  // active card so salary rules can match even when the card's own DOM has no salary.
+  function applyDetailPanelSalary() {
+    if (/\/jobs\/view\/\d+/.test(window.location.pathname)) return;
+    const currentJobId = new URLSearchParams(window.location.search).get('currentJobId');
+    if (!currentJobId) return;
+    let activeCard = null;
+    for (const card of getCards()) {
+      const id = card.dataset.ljfCardJobId || cardJobId(card);
+      if (id === currentJobId) { activeCard = card; break; }
+    }
+    if (!activeCard) return;
+    const { values: salaries, display } = parseSearchDetailSalaries();
+    if (!salaries.length) return;
+    const serialized = JSON.stringify(salaries);
+    if (activeCard.dataset.ljfDetailSalaries === serialized) return;
+    activeCard.dataset.ljfDetailSalaries = serialized;
+    activeCard.dataset.ljfDetailSalaryDisplay = display;
+    delete activeCard.dataset.ljfRulesApplied;
+    delete activeCard.dataset.ljfHighlighted;
+    delete activeCard.dataset.ljfGreenMatch;
+    activeCard.querySelectorAll('.ljf-badge').forEach(b => b.remove());
+    activeCard.style.removeProperty('background-color');
+    activeCard.style.removeProperty('border-left');
+    activeCard.style.removeProperty('box-sizing');
+  }
+
   function applyAllRules() {
+    applyDetailPanelSalary();
+    applyJobLog();
     let total = 0;
     for (const card of getCards()) total += applyCardRules(card);
-    applyJobLog();
     applyDismissLog();
     applyRecentlyAppliedVisibility();
     applyViewHeroRules();
@@ -1577,7 +1674,7 @@
       const entry = matchJobLog(card);
       if (entry) {
         actJobLog(card, entry);
-      } else {
+      } else if (flagMatchingCompanies) {
         const latestDate = matchJobLogCompanyOnly(card);
         if (latestDate !== null) actJobLogCompanyLabel(card, latestDate);
       }
@@ -1897,6 +1994,7 @@
     if (!title && !company) return;
 
     const salaries = parseViewPageSalaries(hero);
+    const salaryDisp = getViewPageSalaryDisplay(hero);
 
     const dismissMatches   = [];
     const highlightMatches = [];
@@ -1953,8 +2051,8 @@
     }
 
     // Rule badges
-    for (const rule of shownDismiss)   addViewBadge(hero, '\u26F3 ' + rule.label, CC.dismissBadge);
-    for (const rule of shownHighlight) addViewBadge(hero, '\u2605 ' + rule.label, CC.highlightBadge);
+    for (const rule of shownDismiss)   addViewBadge(hero, '\u26F3 ' + salaryBadgeLabel(rule, salaryDisp), CC.dismissBadge);
+    for (const rule of shownHighlight) addViewBadge(hero, '\u2605 ' + salaryBadgeLabel(rule, salaryDisp), CC.highlightBadge);
 
     // Job log — exact match badge + tint
     if (logEntry) {
@@ -2074,8 +2172,9 @@
         card.style.setProperty('box-sizing', 'border-box', 'important');
       }
 
-      for (const rule of shownDismiss)   addViewBadge(card, '\u26F3 ' + rule.label, CC.dismissBadge);
-      for (const rule of shownHighlight) addViewBadge(card, '\u2605 ' + rule.label, CC.highlightBadge);
+      const savedSalaryDisp = getSalaryDisplay(card);
+      for (const rule of shownDismiss)   addViewBadge(card, '\u26F3 ' + salaryBadgeLabel(rule, savedSalaryDisp), CC.dismissBadge);
+      for (const rule of shownHighlight) addViewBadge(card, '\u2605 ' + salaryBadgeLabel(rule, savedSalaryDisp), CC.highlightBadge);
 
       if (logEntry) {
         addViewBadge(card, 'Applied' + (logEntry.date ? ' on ' + logEntry.date : ''), CC.dismissBadge);
@@ -2925,13 +3024,13 @@
     tabBar.style.cssText = `display:flex;border-bottom:1px solid ${th.border1};padding:0 8px;`;
 
     const content = document.createElement('div');
-    content.style.cssText = 'padding:16px 18px;min-height:140px;';
+    content.style.cssText = 'padding:10px 18px;min-height:140px;';
 
-    function mkRow(labelText, control, tooltip) {
+    function mkRow(labelText, control, tooltip, indent) {
       const row = document.createElement('label');
-      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;cursor:pointer;';
+      row.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:5px 0 5px ${indent ? '14px' : '0'};cursor:pointer;`;
       const lbl = document.createElement('span');
-      lbl.style.cssText = `font-size:12px;color:${th.panelText};display:flex;align-items:center;gap:5px;`;
+      lbl.style.cssText = `font-size:12px;color:${indent ? th.countText : th.panelText};display:flex;align-items:center;gap:5px;`;
       lbl.textContent = labelText;
       if (tooltip) {
         const info = document.createElement('span');
@@ -3062,6 +3161,18 @@
         });
         content.appendChild(restoreBtn);
       } else if (activeTab === 'Settings') {
+        function mkHeader(text) {
+          const h = document.createElement('div');
+          h.style.cssText = [
+            `color:${th.countText}`, 'font-size:10px', 'font-weight:700',
+            'letter-spacing:.6px', 'text-transform:uppercase',
+            'padding:6px 0 1px',
+          ].join(';');
+          h.textContent = text;
+          return h;
+        }
+        // ── Dismiss Actions ───────────────────────────────────────────────────
+        content.appendChild(mkHeader('Dismiss Actions'));
         content.appendChild(mkRow('Enable Dismiss Actions', mkToggle(dismissActionsEnabled, checked => {
           if (checked && !dismissActionsEnabled) {
             overlay.remove();
@@ -3079,42 +3190,16 @@
             updateTabCount();
           }
         }), 'Auto-clicks LinkedIn\'s native dismiss button on cards matched by flag rules. Disabled by default, this constitutes automated interaction with LinkedIn and may violate their User Agreement.'));
-        content.appendChild(divider());
         content.appendChild(mkRow('Flag dismiss log cards', mkToggle(dismissLogCardsRed, checked => {
           dismissLogCardsRed = checked;
           GM_setValue('ljf_dismissLogCardsRed', checked ? 'true' : 'false');
           clearHighlights();
           applyAllRules();
         }), 'Shows dismiss log cards in red (flagged) instead of grey. When Dismiss Actions is enabled, flagged cards are also eligible for auto-dismissal.'));
-        content.appendChild(divider());
-        content.appendChild(divider());
-        content.appendChild(mkRow('Quick Hover Menu', mkToggle(hoverMenuEnabled, checked => {
-          hoverMenuEnabled = checked;
-          GM_setValue('ljf_hoverMenu', checked ? 'true' : 'false');
-        }), 'Show +/−/» action buttons when hovering a job card x button. The + highlights the company, − adds a flag rule for the company, » dismisses all cards for the same company.'));
-        content.appendChild(divider());
-        (() => {
-          const inp = document.createElement('input');
-          inp.type  = 'number';
-          inp.min   = '1';
-          inp.max   = '365';
-          inp.value = String(reapplyDays);
-          inp.style.cssText = [
-            'width:52px', 'text-align:center', 'border-radius:4px',
-            `border:1px solid ${th.rowBorder}`, `background:${th.rowBg}`,
-            `color:${th.panelText}`, 'font-size:12px', 'padding:3px 6px',
-          ].join(';');
-          inp.addEventListener('change', () => {
-            const v = Math.max(1, parseInt(inp.value, 10) || 14);
-            inp.value   = String(v);
-            reapplyDays = v;
-            GM_setValue('ljf_reapplyDays', String(v));
-            clearHighlights();
-            applyAllRules();
-          });
-          content.appendChild(mkRow('Reapply after (days)', inp, 'Days after applying to a company before the badge switches from ✗ to ✓, indicating it\'s safe to reapply. Default: 14.'));
-        })();
-        content.appendChild(divider());
+        content.appendChild(mkRow('Match location', mkToggle(dismissLogMatchLocation, checked => {
+          dismissLogMatchLocation = checked;
+          GM_setValue('ljf_dismissLogMatchLocation', checked ? 'true' : 'false');
+        }), 'When re-flagging cards from the dismiss log, also require the location to match. Useful if a remote listing you dismissed has since added a separate office role.', true));
         (() => {
           const inp = document.createElement('input');
           inp.type  = 'number';
@@ -3124,7 +3209,7 @@
           inp.style.cssText = [
             'width:52px', 'text-align:center', 'border-radius:4px',
             `border:1px solid ${th.rowBorder}`, `background:${th.rowBg}`,
-            `color:${th.panelText}`, 'font-size:12px', 'padding:3px 6px',
+            `color:${th.panelText}`, 'font-size:12px', 'padding:0 4px', 'height:18px', 'box-sizing:border-box',
           ].join(';');
           inp.addEventListener('change', () => {
             const v = Math.max(1, parseInt(inp.value, 10) || 180);
@@ -3132,15 +3217,44 @@
             dismissLogExpiry = v;
             GM_setValue('ljf_dismissLogExpiry', String(v));
           });
-          content.appendChild(mkRow('Dismiss log expiry (days)', inp, 'How many days before a dismissed job is removed from the dismiss log and stops being re-flagged on future visits. Default: 180.'));
+          content.appendChild(mkRow('Expiry (days)', inp, 'How many days before a dismissed job is removed from the dismiss log and stops being re-flagged on future visits. Default: 180.', true));
         })();
         content.appendChild(divider());
-        content.appendChild(mkRow('Match location when re-flagging', mkToggle(dismissLogMatchLocation, checked => {
-          dismissLogMatchLocation = checked;
-          GM_setValue('ljf_dismissLogMatchLocation', checked ? 'true' : 'false');
-        }), 'When re-flagging cards from the dismiss log, also require the location to match. Useful if a remote listing you dismissed has since added a separate office role.'));
+        // ── Job Log ───────────────────────────────────────────────────────────
+        content.appendChild(mkHeader('Job Log'));
+        content.appendChild(mkRow('Flag matching companies', mkToggle(flagMatchingCompanies, checked => {
+          flagMatchingCompanies = checked;
+          GM_setValue('ljf_flagMatchingCompanies', checked ? 'true' : 'false');
+          clearHighlights();
+          applyAllRules();
+        }), 'When a company in your applied log matches a card but not the exact job title, flag the card with a yellow company badge.'));
+        (() => {
+          const inp = document.createElement('input');
+          inp.type  = 'number';
+          inp.min   = '1';
+          inp.max   = '365';
+          inp.value = String(reapplyDays);
+          inp.style.cssText = [
+            'width:52px', 'text-align:center', 'border-radius:4px',
+            `border:1px solid ${th.rowBorder}`, `background:${th.rowBg}`,
+            `color:${th.panelText}`, 'font-size:12px', 'padding:0 4px', 'height:18px', 'box-sizing:border-box',
+          ].join(';');
+          inp.addEventListener('change', () => {
+            const v = Math.max(1, parseInt(inp.value, 10) || 14);
+            inp.value   = String(v);
+            reapplyDays = v;
+            GM_setValue('ljf_reapplyDays', String(v));
+            clearHighlights();
+            applyAllRules();
+          });
+          content.appendChild(mkRow('Reapply after (days)', inp, 'Days after applying to a company before the badge switches from ✗ to ✓, indicating it\'s safe to reapply. Default: 14.', true));
+        })();
         content.appendChild(divider());
-        content.appendChild(divider());
+        // ── Other ─────────────────────────────────────────────────────────────
+        content.appendChild(mkRow('Quick Hover Menu', mkToggle(hoverMenuEnabled, checked => {
+          hoverMenuEnabled = checked;
+          GM_setValue('ljf_hoverMenu', checked ? 'true' : 'false');
+        }), 'Show +/−/» action buttons when hovering a job card x button. The + highlights the company, − adds a flag rule for the company, » dismisses all cards for the same company.'));
         content.appendChild(mkRow('Dark Mode', mkToggle(darkMode, checked => {
           if (checked !== darkMode) { overlay.remove(); toggleDarkMode(); }
         }), 'Toggle between dark and light panel themes.'));

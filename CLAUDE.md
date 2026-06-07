@@ -52,6 +52,7 @@ These are the first thing to check when LinkedIn ships a layout change.
 | `ljf_dismissLogExpiry` | `'180'` | Days before dismiss log entries expire |
 | `ljf_dismissLogMatchLocation` | `'false'` | Match location when re-flagging dismissed jobs |
 | `ljf_dismissLogCardsRed` | `'false'` | Show dismiss log cards in red (vs grey) |
+| `ljf_flagMatchingCompanies` | `'true'` | Flag cards where company matches applied log but title doesn't |
 
 ## Functions reference
 
