@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.7.1
+// @version      1.7.2
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -799,6 +799,7 @@
       const pills = [total + ' apps'];
       if (todayCount > 0) pills.push('today: ' + todayCount);
       if (weekCount  > 0) pills.push('week: '  + weekCount);
+      if (responded > 0) pills.push(Math.round(responded / total * 100) + '% response');
       if ((counts.rejected + counts.closed) > 0) pills.push(Math.round((counts.rejected + counts.closed) / total * 100) + '% rejected');
       if ((counts.interviewing + counts.closed + counts.rejected + counts.offer + counts.withdrawn) > 0) pills.push(Math.round((total -(counts.interviewing + counts.closed + counts.rejected + counts.offer + counts.withdrawn)) / total * 100) + '% ghosted');
       if (counts.interviewing > 0) pills.push(counts.interviewing + ' interviewing');
