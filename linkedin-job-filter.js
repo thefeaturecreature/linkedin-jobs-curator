@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.7.0
+// @version      1.7.1
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -10,8 +10,7 @@
 // @downloadURL  https://update.greasyfork.org/scripts/573971/LinkedIn%20Jobs%20Curator.user.js
 // @updateURL    https://update.greasyfork.org/scripts/573971/LinkedIn%20Jobs%20Curator.meta.js
 // @icon         https://raw.githubusercontent.com/thefeaturecreature/linkedin-jobs-curator/main/icon.png
-// @match        https://www.linkedin.com/jobs/*
-// @match        https://www.linkedin.com/my-items/*
+// @match        https://www.linkedin.com/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @run-at       document-idle
@@ -481,20 +480,6 @@
     return map[s] || map.applied;
   }
 
-  function computeStats(log) {
-    const total = log.length;
-    if (total === 0) return '';
-    const counts = { applied: 0, interviewing: 0, offer: 0, rejected: 0, closed: 0, withdrawn: 0 };
-    for (const e of log) counts[e.status || 'applied']++;
-    const responded = counts.interviewing + counts.offer + counts.closed;
-    const pills = [];
-    pills.push(total + ' apps');
-    if (responded > 0) pills.push(Math.round(responded / total * 100) + '% response');
-    if (counts.rejected > 0) pills.push(Math.round(counts.rejected / total * 100) + '% ghosted');
-    if (counts.interviewing > 0) pills.push(counts.interviewing + ' interviewing');
-    return pills.map(p => `<span class="ljf-stat-pill">${p}</span>`).join('');
-  }
-
   function renderJobsPane() {
     const pane = document.getElementById('ljf-pane-jobs');
     if (!pane) return;
@@ -814,8 +799,8 @@
       const pills = [total + ' apps'];
       if (todayCount > 0) pills.push('today: ' + todayCount);
       if (weekCount  > 0) pills.push('week: '  + weekCount);
-      if (responded > 0)          pills.push(Math.round(responded / total * 100) + '% response');
-      if (counts.rejected > 0)    pills.push(Math.round(counts.rejected / total * 100) + '% ghosted');
+      if ((counts.rejected + counts.closed) > 0) pills.push(Math.round((counts.rejected + counts.closed) / total * 100) + '% rejected');
+      if ((counts.interviewing + counts.closed + counts.rejected + counts.offer + counts.withdrawn) > 0) pills.push(Math.round((total -(counts.interviewing + counts.closed + counts.rejected + counts.offer + counts.withdrawn)) / total * 100) + '% ghosted');
       if (counts.interviewing > 0) pills.push(counts.interviewing + ' interviewing');
       for (const p of pills) {
         const pill = document.createElement('span');
