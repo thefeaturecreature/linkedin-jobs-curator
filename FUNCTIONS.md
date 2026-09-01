@@ -130,7 +130,7 @@ Notable functions in `linkedin-job-filter.js`.
 ## Apply Capture
 | Function | Description |
 |---|---|
+| `dlog(...args)` | Console-log with `[LJF debug]` prefix, gated by the `DEBUG` constant (off by default) |
 | `setupApplyCapture()` | Listen for "Yes, applied" clicks, undo clicks, and native dismiss clicks |
 | `captureAppliedJob()` | Log a job as applied from the current detail pane; falls back to `document.title` parsing on standalone view pages |
-| `captureViewPageAppliedJob()` | Log an applied job from a job view page URL |
-| `setupViewPageApplyCapture()` | Set up MutationObserver for view-page apply confirmation |
+| `setupViewPageApplyCapture()` | Set up MutationObserver watching for the post-apply "how you fit" panel on view pages and the search-results split view; calls `captureAppliedJob()` when it appears |
