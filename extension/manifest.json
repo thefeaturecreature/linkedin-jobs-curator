@@ -1,0 +1,43 @@
+{
+  "manifest_version": 2,
+  "name": "LinkedIn Jobs Curator",
+  "version": "1.7.3",
+  "description": "Rule-based job card filter for LinkedIn — flag by company, title, or salary floor, highlight the good ones, and track applications in a built-in log.",
+  "homepage_url": "https://github.com/thefeaturecreature/linkedin-jobs-curator",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "linkedin-jobs-curator@featurecreature.co",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": [
+    "storage",
+    "identity",
+    "https://sheets.googleapis.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "run_at": "document_idle",
+      "js": ["content/store.js", "content/curator.js"]
+    }
+  ],
+  "background": {
+    "scripts": [
+      "background/config.local.js",
+      "background/auth.js",
+      "background/sheets.js",
+      "background/sync.js",
+      "background/background.js"
+    ],
+    "persistent": true
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  }
+}

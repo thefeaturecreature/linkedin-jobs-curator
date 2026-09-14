@@ -1,16 +1,22 @@
 # LinkedIn Jobs Curator
 
-A Violentmonkey userscript that brings rule-based filtering, highlights, and an application tracker to LinkedIn job search. Every card on the page is automatically scanned and badged based on your rules: companies you've dismissed before are re-flagged, companies you've applied to show how long ago, cards will flag and highlight based on rules you set, and salary rules surface or bury cards by pay range.
+A Firefox extension that brings rule-based filtering, highlights, and an application tracker to LinkedIn job search. Every card on the page is automatically scanned and badged based on your rules: companies you've dismissed before are re-flagged, companies you've applied to show how long ago, cards will flag and highlight based on rules you set, and salary rules surface or bury cards by pay range.
 
 ## Browser compatibility
 
-**Firefox only.** Chrome is intentionally not supported. LinkedIn's anti-automation protections block the DOM access the script relies on in Chromium-based browsers, and working around those protections risks account suspension.
+**Firefox only.** Chrome is intentionally not supported. LinkedIn's anti-automation protections block the DOM access the extension relies on in Chromium-based browsers, and working around those protections risks account suspension.
 
 ## Installation
 
-1. Install [Violentmonkey](https://violentmonkey.github.io/) (recommended), [Tampermonkey](https://www.tampermonkey.net/), or [Greasemonkey](https://addons.mozilla.org/en-US/firefox/addon/greasemonkey/)
-2. Install the script from [Greasy Fork](https://greasyfork.org/en/scripts/573971-linkedin-jobs-curator) — or click **Raw** on `linkedin-job-filter.js` above and your userscript manager will prompt you to install it
-3. Navigate to `linkedin.com/jobs` — the panel appears on the right edge of the page
+A native Firefox extension lives in [`extension/`](extension/) — no userscript manager needed.
+
+- **Temporary load:** `about:debugging` → *This Firefox* → *Load Temporary Add-on* → pick `extension/manifest.json`.
+- **From source:** `npm install` then `npm start` (launches a clean Firefox with the extension), or `npm run build` for a packaged `.zip` in `dist/`.
+- Navigate to `linkedin.com/jobs` — the panel appears on the right edge of the page.
+
+Data is stored per-browser in `browser.storage.local`. To move between browsers, use **Settings → Backup** in the panel. Google Sheets sync is planned for a later version.
+
+<sub>Coming from the old userscript? It's preserved, frozen, at [`legacy-monkey-script/linkedin-job-filter.js`](legacy-monkey-script/linkedin-job-filter.js) for anyone still using a userscript manager, but no longer receives fixes or features.</sub>
 
 ---
 
@@ -91,7 +97,7 @@ Highlight rules work on every page that shows job cards — including the **Top 
 
 ## Application log
 
-Auto-captures Easy Apply applications as you submit them, and external applications when you click **Yes** on LinkedIn's "Did you apply?" prompt. Badges cards from companies you've previously applied to with date and days elapsed. You can also import an existing log via CSV or JSON to seed your history.
+Log a job with one click: open its listing, go to the Jobs tab, and hit the **+** autofill button to pull the company, title, and link into the add-job form — review and hit **Save**. Badges cards from companies you've previously applied to with date and days elapsed. You can also import an existing log via CSV or JSON to seed your history.
 
 <img src="Screenshots/last-applied-close.jpg" alt="Recently applied card — within reapply window" width="500">
 
