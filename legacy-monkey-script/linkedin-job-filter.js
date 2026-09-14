@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinkedIn Jobs Curator
 // @namespace    https://github.com/thefeaturecreature/linkedin-jobs-curator
-// @version      1.7.2
+// @version      1.7.3
 // @author       Evan Dierlam
 // @description  Rule-based job card filter for LinkedIn. Flag jobs by company, title, salary floor, or industry — highlight the good ones green, dismiss the noise, and track applications in a built-in log that automatically flags companies you've already applied to.
 // @license      GPL-3.0
@@ -20,6 +20,9 @@
   'use strict';
 
   // ─── Constants ────────────────────────────────────────────────────────────────
+
+  const DEBUG = false; // set true to log apply-capture diagnostics to the console
+  function dlog(...args) { if (DEBUG) console.log('[LJF debug]', ...args); }
 
   const STORAGE_KEY      = 'ljf_rules';
   const LOG_KEY          = 'ljf_applied_log';
@@ -4309,23 +4312,32 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
   const DETAIL_COMPANY_SEL = '.jobs-unified-top-card__company-name a, .job-details-jobs-unified-top-card__company-name a';
   const YES_BTN_SEL        = '[data-view-name="offsite-apply-confirmation-banner-reply-yes"]';
   const EASY_APPLY_SUBMIT  = '[data-live-test-easy-apply-submit-button]';
-  const VIEW_CONFIRM_SEL   = '[componentkey="AppliedHowYouFitSlot"]';
+  // LinkedIn renames this componentkey across flows (AppliedHowYouFitSlot,
+  // OffsiteApplyClickedHowYouFitSlot, ...); match any post-apply variant while
+  // excluding the pre-apply "InitialStateHowYouFitSlot".
+  const VIEW_CONFIRM_SEL   = '[componentkey$="HowYouFitSlot"]:not([componentkey^="InitialState"])';
 
   function captureAppliedJob() {
+    dlog('captureAppliedJob() called, pathname=', window.location.pathname);
     const titleEl   = document.querySelector(DETAIL_TITLE_SEL);
     const companyEl = document.querySelector(DETAIL_COMPANY_SEL);
 
     let title   = titleEl   ? titleEl.textContent.trim()   : '';
     let company = companyEl ? companyEl.textContent.trim() : '';
+    dlog('detail-pane parse:', { title, company, titleElFound: !!titleEl, companyElFound: !!companyEl });
 
     // On a standalone view page the detail-pane selectors find nothing — fall back to document.title
     if (!title && !company && /\/jobs\/view\/\d+/.test(window.location.pathname)) {
       const parts = document.title.split(' | ');
       title   = (parts[0] || '').trim();
       company = (parts[1] || '').trim();
+      dlog('fell back to document.title parse:', { title, company, docTitle: document.title });
     }
 
-    if (!title && !company) return;
+    if (!title && !company) {
+      dlog('bailing — no title and no company found');
+      return;
+    }
 
     const href   = titleEl ? (titleEl.getAttribute('href') || '') : '';
     const jobIdM = href.match(/\/jobs\/view\/(\d+)/) || window.location.pathname.match(/\/jobs\/view\/(\d+)/);
@@ -4340,12 +4352,15 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
       e.title.toLowerCase()   === title.toLowerCase()
     );
     if (dup) {
+      dlog('duplicate found, skipping:', dup);
       setStatus('\u2139 Already in log: ' + (title || company));
       return;
     }
 
+    dlog('pushing new entry:', { company, title, date, url });
     appliedLog.push({ company, title, date, url });
     saveAppliedLog();
+    dlog('appliedLog length after save:', appliedLog.length);
     clearHighlights();
     applyAllRules();
     if (panelOpen) renderRules();
@@ -4380,7 +4395,12 @@ ${(!isHiRule && dismissActionsEnabled) ? `<button class="ljf-run-one ljf-btn-dis
 
 function setupApplyCapture() {
     document.addEventListener('click', e => {
-      if (e.target.closest(YES_BTN_SEL) || e.target.closest(EASY_APPLY_SUBMIT)) captureAppliedJob();
+      const yesMatch = e.target.closest(YES_BTN_SEL);
+      const easyMatch = e.target.closest(EASY_APPLY_SUBMIT);
+      if (yesMatch || easyMatch) {
+        dlog('click matched apply-capture selector:', { yesMatch: !!yesMatch, easyMatch: !!easyMatch });
+        captureAppliedJob();
+      }
       const undoBtn = e.target.closest(UNDO_SEL);
       if (undoBtn) {
         const card = undoBtn.closest(CARD_SEL);
@@ -4413,56 +4433,26 @@ function setupApplyCapture() {
     }, true);
   }
 
-  function captureViewPageAppliedJob() {
-    // Parse "Job Title | Company Name | LinkedIn" from document.title
-    const parts   = document.title.split(' | ');
-    const title   = (parts[0] || '').trim();
-    const company = (parts[1] || '').trim();
-    if (!title && !company) return;
-
-    const jobIdM = window.location.pathname.match(/\/jobs\/view\/(\d+)/);
-    const url    = jobIdM
-      ? 'https://www.linkedin.com/jobs/view/' + jobIdM[1] + '/'
-      : window.location.href;
-
-    const dup = appliedLog.find(e =>
-      e.company.toLowerCase() === company.toLowerCase() &&
-      e.title.toLowerCase()   === title.toLowerCase()
-    );
-    if (dup) {
-      setStatus('\u2139 Already in log: ' + (title || company));
-      return;
-    }
-
-    const date = localDateStr();
-    appliedLog.push({ company, title, date, url });
-    saveAppliedLog();
-    clearHighlights();
-    applyAllRules();
-    if (panelOpen) renderRules();
-
-    const htmlText  = '<table><tr><td>' + company + '</td><td>' + title + '</td><td><a href="' + url + '">' + url + '</a></td></tr></table>';
-    const plainText = company + '\t' + title + '\t' + url;
-    navigator.clipboard.write([
-      new ClipboardItem({
-        'text/html':  new Blob([htmlText],  { type: 'text/html' }),
-        'text/plain': new Blob([plainText], { type: 'text/plain' }),
-      }),
-    ]).catch(() => navigator.clipboard.writeText(plainText));
-
-    setStatus('\u2713 Logged & copied: ' + (title || company));
-  }
+  // Matches both a standalone job view page and the search-results split view
+  // (where the post-apply "Did you finish applying?" panel now also appears,
+  // in the detail pane, addressed via ?currentJobId=).
+  const VIEW_PAGE_RE = /\/jobs\/(view\/\d+|search-results)/;
 
   function setupViewPageApplyCapture() {
-    if (!/\/jobs\/view\/\d+/.test(window.location.pathname)) return;
+    if (!VIEW_PAGE_RE.test(window.location.pathname)) {
+      dlog('setupViewPageApplyCapture: pathname did not match, not arming. pathname=', window.location.pathname);
+      return;
+    }
+    dlog('setupViewPageApplyCapture: armed for pathname=', window.location.pathname);
 
     let captured = false;
     const observer = new MutationObserver(() => {
       if (captured) return;
       if (!document.querySelector(VIEW_CONFIRM_SEL)) return;
+      dlog('VIEW_CONFIRM_SEL matched:', document.querySelector(VIEW_CONFIRM_SEL).getAttribute('componentkey'));
       captured = true;
       observer.disconnect();
-      captureViewPageAppliedJob();
+      captureAppliedJob();
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }
@@ -4491,7 +4481,7 @@ function setupApplyCapture() {
     const _pushState = history.pushState.bind(history);
     history.pushState = function(state, title, url) {
       _pushState(state, title, url);
-      if (/\/jobs\/view\/\d+/.test(String(url))) setupViewPageApplyCapture();
+      if (VIEW_PAGE_RE.test(String(url))) setupViewPageApplyCapture();
     };
     setTimeout(() => {
       const n = applyAllRules();

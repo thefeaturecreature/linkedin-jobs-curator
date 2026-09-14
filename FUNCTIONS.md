@@ -1,6 +1,50 @@
 # Functions Reference
 
-Notable functions in `linkedin-job-filter.js`.
+Notable functions in `linkedin-job-filter.js` (the userscript) and, where noted, the
+Firefox extension under `extension/`.
+
+## Storage shim (extension only — `extension/content/store.js`)
+| Function | Description |
+|---|---|
+| `hydrate()` | Load all `ljf_*` keys from `browser.storage.local` into an in-memory `cache` once, before the core boots; also fires a fire-and-forget `ljf:tab-open` runtime message (the Sheets sync "pull on open" trigger). Exposed as `window.__ljfStore.hydrate`. |
+| `GM_getValue(key, dflt)` | Synchronous read from `cache` (same contract the userscript core expects). Exposed as `window.GM_getValue`. |
+| `GM_setValue(key, value)` | Write `cache` synchronously, persist to `browser.storage.local` fire-and-forget. Exposed as `window.GM_setValue`. |
+| `storage.onChanged` listener | Refresh `cache` on another tab's write, then call `window.__ljfOnExternalChange(keys)` (set by `curator.js` to reload the arrays and re-scan). Self-writes are suppressed. |
+
+## Google Sheets sync (extension only — `extension/background/`)
+
+Files load in manifest order (`auth.js`, `sheets.js`, `sync.js`, `background.js`), sharing one
+background-page global scope. `ljfs_*`-prefixed storage keys hold sync config/tokens — local-only,
+never synced, never touched by `store.js`'s `ljf_*`-only hydrate.
+
+### `auth.js` — OAuth (`window.LJFAuth`)
+| Function | Description |
+|---|---|
+| `getConfig()` | Returns `{ hasClientId, spreadsheetId, connected }` from local storage + `window.LJF_CONFIG.clientId` (set by `config.local.js`) |
+| `getToken({interactive})` | Returns a valid access token — cached if unexpired, else a silent `prompt=none` refresh, else (only if `interactive:true`) a visible consent window (opens in a new tab) |
+| `connect(spreadsheetId)` | Saves the spreadsheet ID, runs an interactive auth round-trip (throws on failure/cancel, e.g. missing client ID in `config.local.js`), marks connected |
+| `disconnect()` | Clears the token and `connected` flag; keeps `spreadsheetId` for easy reconnect |
+
+### `sheets.js` — Sheets API v4 client (`window.LJFSheets`)
+| Function | Description |
+|---|---|
+| `ensureTabs(spreadsheetId)` | Creates whichever of `rules`/`applied_log`/`dismiss_log` don't exist yet, with a header row; leaves existing tabs untouched |
+| `readTab(spreadsheetId, tabName)` | Reads a tab (`valueRenderOption=UNFORMATTED_VALUE`) → array of plain objects, via the tab's fixed `SCHEMAS` column list plus a `meta` JSON catch-all column |
+| `writeTab(spreadsheetId, tabName, objects)` | Clears a tab and rewrites header + all rows (`valueInputOption=RAW`) — whole-tab rewrite per sync, not cell-level patching |
+
+### `sync.js` — merge engine (`window.LJFSync`)
+| Function | Description |
+|---|---|
+| `mergeStore(local, remote, snapshot, keyFn)` | Pure: snapshot-diff 3-way merge of one store's arrays — local wins any same-key conflict (edit-vs-edit or edit-vs-delete). No timestamps needed. |
+| `syncStore(storeName)` | Reads local + remote + snapshot for one store, merges, writes the result to both local storage and the sheet, saves the new snapshot. Coalesces overlapping calls via an in-flight `Promise` map. |
+| `syncAll()` | `ensureTabs()` then `syncStore()` for all three stores in parallel |
+
+### `background.js` — wiring
+Runs `syncAll()` on its own load (pull-on-open) and on an `ljf:tab-open` message from a content
+script; runs it again (debounced ~3s) on `storage.onChanged` for the three synced keys (push-on-
+change). Also answers `ljf:connect`/`ljf:disconnect`/`ljf:sync-now`/`ljf:get-status` messages sent
+by the in-page panel's Backup tab (`buildSheetsSyncSection()` in `content/curator.js` — not the
+options page, which can't call `browser.identity` directly).
 
 ## Rule Management
 | Function | Description |
@@ -34,6 +78,8 @@ Notable functions in `linkedin-job-filter.js`.
 | `undoLogDismissal(card)` | Remove dismiss log entry for a card (called on undo) |
 | `actDismissLog(card, entry)` | Apply grey (or red) tint + badge to a previously-dismissed card |
 | `applyDismissLog()` | Run `matchDismissLog`/`actDismissLog` on all cards |
+| `resetCard(card)` | Strip all script-applied styles/badges/dataset markers from one card (used on undo) |
+| `setupDismissCapture()` | Document-level click listener: restores a card on LinkedIn's native undo click, and logs a dismissal on LinkedIn's native X click (list card or job detail panel) |
 
 ## Color Management
 | Function | Description |
@@ -109,8 +155,9 @@ Notable functions in `linkedin-job-filter.js`.
 | `updateTabCount()` | Update red/green/yellow pill counts on the side tab |
 | `updateDismissLogCount()` | Update dismiss log count display in the status bar |
 | `renderRules()` | Re-render the rules panel pane |
-| `renderJobsPane()` | Re-render the jobs pane; toggles between applied log and dismiss log views via `activeLogView` |
+| `renderJobsPane()` | Re-render the jobs pane; toggles between applied log and dismiss log views via `activeLogView`. Jobs-view footer has a blank-add button (`_`) and an autofill button (`+`) that fills the add-job form from `detectCurrentJobListing()` |
 | `openSettingsModal()` | Open settings/backup modal dialog |
+| `buildSheetsSyncSection()` | Backup tab's Google Sheets sync controls (spreadsheet field, Authorize/Disconnect, Sync now, status line); messages the background page (`ljf:connect`/`ljf:disconnect`/`ljf:sync-now`/`ljf:get-status`) rather than touching `browser.identity` itself |
 | `openOnboardingModal()` | Show first-run onboarding modal |
 | `setStatus(msg)` | Set panel status bar message |
 | `setupCardHoverMenu()` | Build and wire the hover-over-X quick action menu |
@@ -127,10 +174,20 @@ Notable functions in `linkedin-job-filter.js`.
 | `importAppliedLogCsv()` | Upload log CSV; routes dismissed rows to dismiss log |
 | `downloadLogCsvTemplate()` | Download sample CSV for manual data entry |
 
-## Apply Capture
+## Job Listing Detection
+
+LinkedIn's job-detail markup is atomic-CSS (every class name is a short hash, regenerated per
+deploy) — no classname selector survives it. Detection instead keys off the job ID in the URL
+(`/jobs/view/<id>` or `?currentJobId=<id>`), which is stable.
+
 | Function | Description |
 |---|---|
-| `setupApplyCapture()` | Listen for "Yes, applied" clicks, undo clicks, and native dismiss clicks |
-| `captureAppliedJob()` | Log a job as applied from the current detail pane; falls back to `document.title` parsing on standalone view pages |
-| `captureViewPageAppliedJob()` | Log an applied job from a job view page URL |
-| `setupViewPageApplyCapture()` | Set up MutationObserver for view-page apply confirmation |
+| `dlog(...args)` | Console-log with `[LJF debug]` prefix, gated by the `DEBUG` constant (off by default) |
+| `nearestCompanyLink(fromEl, maxHops)` | Walk up from a title anchor to the nearest ancestor containing a company-profile link with visible text; skips text-less matches caused by LinkedIn's invalid nested-`<a>` markup (browsers auto-close the outer one) |
+| `detectCurrentJobListing()` | Find the job ID from the URL, locate the (unique) title anchor via `a[href*="/jobs/view/<id>"]`, pair it with `nearestCompanyLink()` for the company; fills in anything still missing from `document.title` (`"<Title> \| <Company> \| LinkedIn"`). Returns `{ title, company, url }` with `url` normalized to `https://www.linkedin.com/jobs/view/<id>/` (tracking query params stripped), or `null` if nothing is detected. Backs the Jobs tab's autofill button (see `renderJobsPane` under UI) |
+
+There used to be an automatic apply-capture hook here (`setupApplyCapture`'s Easy-Apply/"Yes, applied"
+click listener, `captureAppliedJob()`, `setupViewPageApplyCapture()`'s MutationObserver on the
+post-apply panel). It was removed — LinkedIn kept renaming the selectors it depended on (see
+`project_apply_capture_fragility` in memory) — in favor of the manual autofill button, which uses
+the same `detectCurrentJobListing()`.

@@ -2,5 +2,8 @@
 .claude/
 .claude-assistant
 *.local
+config.local.js
 samples
 .mcp
+node_modules
+dist

@@ -1,0 +1,15 @@
+{
+  "name": "linkedin-jobs-curator",
+  "version": "1.7.3",
+  "description": "LinkedIn Jobs Curator — Firefox extension",
+  "private": true,
+  "license": "GPL-3.0",
+  "scripts": {
+    "lint": "web-ext lint -s extension",
+    "start": "web-ext run -s extension",
+    "build": "web-ext build -s extension -a dist --overwrite-dest"
+  },
+  "devDependencies": {
+    "web-ext": "^8"
+  }
+}
